@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Job Application Autofill",
   "version": "1.0.0",
-  "description": "Automatically fill job application forms, with special support for Greenhouse",
+  "description": "Helps fill out forms on ATS job applications with one click. Supports multiple resumes and EEO fields.",
   
   "permissions": [
     "storage",
@@ -37,6 +37,7 @@
       "matches": [
         "https://boards.greenhouse.io/*",
         "https://job-boards.greenhouse.io/*",
+        "https://*.greenhouse.io/*",
         "https://jobs.lever.co/*",
         "https://*.myworkday.com/*"
       ],

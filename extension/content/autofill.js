@@ -4,17 +4,56 @@
 (function() {
   'use strict';
 
+  // ==================== Configuration ====================
+  
+  // Set to false for production release
+  const DEBUG = false;
+  
+  // Conditional logging - only logs when DEBUG is true
+  const log = (...args) => { if (DEBUG) log('', ...args); };
+  const logError = (...args) => { logError('', ...args); }; // Always log errors
+
   // Prevent multiple injections
   if (window.__jobAutofillLoaded) return;
   window.__jobAutofillLoaded = true;
 
   // ==================== In-Page Notification ====================
   
+  /**
+   * Check if current page is an actual job application page (not a listing page)
+   * Application pages have /jobs/ followed by a job ID in the URL
+   */
+  function isApplicationPage() {
+    const url = window.location.href;
+    const path = window.location.pathname;
+    
+    // Greenhouse: must have /jobs/ followed by a number
+    if (window.location.hostname.includes('greenhouse.io')) {
+      return /\/jobs\/\d+/.test(path);
+    }
+    
+    // Lever: must have a job ID in the path
+    if (window.location.hostname.includes('lever.co')) {
+      // Lever job pages look like: /company/job-id-uuid
+      return path.split('/').length >= 3 && path.split('/')[2].length > 10;
+    }
+    
+    // Workday: check for job apply page
+    if (window.location.hostname.includes('workday.com')) {
+      return url.includes('/job/') || url.includes('/apply');
+    }
+    
+    // Generic: check for application form
+    return document.querySelector('#application_form') !== null ||
+           document.querySelector('form[action*="apply"]') !== null;
+  }
+  
   function showNotificationBanner() {
     if (document.getElementById('job-autofill-notif')) return;
     if (sessionStorage.getItem('job-autofill-dismissed')) return;
 
-    const isGreenhouse = window.location.hostname.includes('greenhouse.io');
+    // Only show on actual application pages, not listing pages
+    if (!isApplicationPage()) return;
     
     const notif = document.createElement('div');
     notif.id = 'job-autofill-notif';
@@ -99,7 +138,7 @@
             justify-content: center;
             font-size: 18px;
           ">
-            ${isGreenhouse ? '🌿' : '💼'}
+            🌿
           </div>
           <div>
             <div style="font-weight: 600; font-size: 14px; color: #1f2937;">
@@ -112,7 +151,7 @@
         </div>
         
         <div style="font-size: 13px; color: #374151; margin-bottom: 14px; line-height: 1.4;">
-          ${isGreenhouse ? 'Greenhouse application' : 'Job application'} detected! Click below to auto-fill this form.
+          This page is supported! Click below to autofill.
         </div>
         
         <button id="job-autofill-btn" style="
@@ -160,7 +199,7 @@
       }
     }, 10000);
     
-    console.log('[Autofill] Notification shown');
+    log(' Notification shown');
   }
 
   // ==================== Field Mappings ====================
@@ -350,7 +389,7 @@
     
     const { waitForAsync = false, typeToSearch = true } = options;
     
-    console.log(`[Autofill] React Select: keywords=[${labelKeywords.join(', ')}], value="${value}", typeToSearch=${typeToSearch}`);
+    log(` React Select: keywords=[${labelKeywords.join(', ')}], value="${value}", typeToSearch=${typeToSearch}`);
     
     // First, close any open dropdowns
     document.body.click();
@@ -365,7 +404,7 @@
       const matches = labelKeywords.some(kw => labelText.includes(kw.toLowerCase()));
       if (!matches) continue;
       
-      console.log(`[Autofill] Found label: "${labelText.substring(0, 60)}"`);
+      log(` Found label: "${labelText.substring(0, 60)}"`);
       
       // Greenhouse: label is inside select__container, select-shell is sibling
       const selectContainer = label.parentElement;
@@ -375,25 +414,25 @@
       const selectShell = selectContainer.querySelector('.select-shell, [class*="select-shell"]');
       
       if (!selectShell) {
-        console.log('[Autofill] No select-shell found');
+        log(' No select-shell found');
         continue;
       }
       
       // Check if already has a value
       const existingValue = selectShell.querySelector('.select__single-value');
       if (existingValue && existingValue.textContent && !existingValue.textContent.includes('Select')) {
-        console.log('[Autofill] Already has value:', existingValue.textContent);
+        log(' Already has value:', existingValue.textContent);
         return false;
       }
       
       // Get input for later use
       const input = selectShell.querySelector('input.select__input, input[role="combobox"]');
       const inputId = input?.id;
-      console.log('[Autofill] Input ID:', inputId);
+      log(' Input ID:', inputId);
       
       // Open dropdown using Pointer Events sequence (required for React Select)
       const control = selectShell.querySelector('.select__control') || selectShell;
-      console.log('[Autofill] Opening dropdown with pointer events');
+      log(' Opening dropdown with pointer events');
       
       // Focus first
       if (input) input.focus();
@@ -425,7 +464,7 @@
       let menu = selectShell.querySelector('.select__menu');
       let menuOptions = menu?.querySelectorAll('.select__option') || [];
       
-      console.log(`[Autofill] Menu in shell: ${!!menu}, options: ${menuOptions.length}`);
+      log(` Menu in shell: ${!!menu}, options: ${menuOptions.length}`);
       
       // If not in shell, check if it's a portal (some React Select configs render menu outside)
       if (!menu || menuOptions.length === 0) {
@@ -439,7 +478,7 @@
           if (portalMenu) {
             menu = portalMenu.closest('.select__menu') || portalMenu;
             menuOptions = menu.querySelectorAll('.select__option');
-            console.log(`[Autofill] Found via aria-controls: ${menuOptions.length} options`);
+            log(` Found via aria-controls: ${menuOptions.length} options`);
           }
         }
         
@@ -456,7 +495,7 @@
             
             menu = m;
             menuOptions = opts;
-            console.log(`[Autofill] Found global menu: ${menuOptions.length} options`);
+            log(` Found global menu: ${menuOptions.length} options`);
             break;
           }
         }
@@ -464,7 +503,7 @@
       
       // Type to search if needed
       if (typeToSearch && input && menu) {
-        console.log('[Autofill] Typing to search:', value);
+        log(' Typing to search:', value);
         input.focus();
         
         // Clear and type
@@ -477,7 +516,7 @@
         input.dispatchEvent(new Event('input', { bubbles: true }));
         
         // Wait for search results
-        console.log('[Autofill] Waiting for search results...');
+        log(' Waiting for search results...');
         await new Promise(r => setTimeout(r, 1000));
         
         // Re-find menu options after search
@@ -491,13 +530,13 @@
           }
         }
         menuOptions = menu?.querySelectorAll('.select__option') || [];
-        console.log(`[Autofill] After search: ${menuOptions.length} options`);
+        log(` After search: ${menuOptions.length} options`);
       }
       
       // Check for no options
       const noOptionsNotice = menu?.querySelector('.select__menu-notice--no-options');
       if (noOptionsNotice || menuOptions.length === 0) {
-        console.log('[Autofill] No options available');
+        log(' No options available');
         // Close dropdown
         input?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
         document.body.click();
@@ -507,7 +546,7 @@
       
       // Log available options
       const optionTexts = Array.from(menuOptions).map(o => o.textContent?.trim());
-      console.log('[Autofill] Options:', optionTexts.slice(0, 8));
+      log(' Options:', optionTexts.slice(0, 8));
       
       // Find best matching option
       const valueLower = value.toLowerCase().trim();
@@ -580,7 +619,7 @@
       }
       
       if (bestMatch && bestScore >= 40) {
-        console.log(`[Autofill] ✓ Best match: "${bestMatch.textContent?.substring(0, 50)}" (score: ${bestScore})`);
+        log(` ✓ Best match: "${bestMatch.textContent?.substring(0, 50)}" (score: ${bestScore})`);
         
         // Scroll option into view
         bestMatch.scrollIntoView({ block: 'nearest' });
@@ -609,16 +648,16 @@
         // Verify selection
         const newValue = selectShell.querySelector('.select__single-value');
         if (newValue && newValue.textContent && !newValue.textContent.includes('Select')) {
-          console.log('[Autofill] ✓ Confirmed:', newValue.textContent);
+          log(' ✓ Confirmed:', newValue.textContent);
           // Close any remaining dropdowns
           document.body.click();
           await new Promise(r => setTimeout(r, 200));
           return true;
         } else {
-          console.log('[Autofill] Selection not confirmed');
+          log(' Selection not confirmed');
         }
       } else {
-        console.log(`[Autofill] ✗ No good match (best: ${bestScore})`);
+        log(` ✗ No good match (best: ${bestScore})`);
       }
       
       // Close dropdown before next field
@@ -663,7 +702,7 @@
   async function fillPhoneWithCountry(phoneValue) {
     if (!phoneValue) return false;
     
-    console.log('[Autofill] Filling phone with country code:', phoneValue);
+    log(' Filling phone with country code:', phoneValue);
     
     // Parse phone number - extract country code and number
     let countryCode = 'us'; // default
@@ -681,12 +720,12 @@
     // Remove any remaining + or leading spaces
     phoneNumber = phoneNumber.replace(/^\+/, '').trim();
     
-    console.log('[Autofill] Country:', countryCode, 'Number:', phoneNumber);
+    log(' Country:', countryCode, 'Number:', phoneNumber);
     
     // Find the phone input container
     const phoneContainer = document.querySelector('.phone-input');
     if (!phoneContainer) {
-      console.log('[Autofill] No phone-input container found, using standard fill');
+      log(' No phone-input container found, using standard fill');
       return false;
     }
     
@@ -695,7 +734,7 @@
     const countryShell = phoneContainer.querySelector('.select-shell');
     
     if (countryShell) {
-      console.log('[Autofill] Found country selector');
+      log(' Found country selector');
       
       // Check if country already selected
       const existingValue = countryShell.querySelector('.select__single-value');
@@ -735,7 +774,7 @@
             for (const opt of options) {
               const text = opt.textContent?.toLowerCase() || '';
               if (text.includes('united states') || text.includes('+1')) {
-                console.log('[Autofill] Selecting US');
+                log(' Selecting US');
                 const optRect = opt.getBoundingClientRect();
                 ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(type => {
                   opt.dispatchEvent(new PointerEvent(type, {
@@ -758,7 +797,7 @@
           await new Promise(r => setTimeout(r, 200));
         }
       } else {
-        console.log('[Autofill] Country already selected:', existingValue.textContent);
+        log(' Country already selected:', existingValue.textContent);
       }
     }
     
@@ -771,10 +810,10 @@
         phoneInput.dispatchEvent(new Event('input', { bubbles: true }));
         phoneInput.dispatchEvent(new Event('change', { bubbles: true }));
         phoneInput.dispatchEvent(new Event('blur', { bubbles: true }));
-        console.log('[Autofill] Filled phone:', phoneNumber);
+        log(' Filled phone:', phoneNumber);
         return true;
       } else {
-        console.log('[Autofill] Phone already has value:', phoneInput.value);
+        log(' Phone already has value:', phoneInput.value);
       }
     }
     
@@ -789,7 +828,7 @@
     // IMPORTANT: Only fill if the field is currently empty
     // This prevents overwriting user's manual input
     if (!isFieldEmpty(element)) {
-      console.log(`[Autofill] Skipping non-empty field: ${element.name || element.id || 'unknown'}`);
+      log(` Skipping non-empty field: ${element.name || element.id || 'unknown'}`);
       return false;
     }
     
@@ -800,7 +839,7 @@
     element.dispatchEvent(new Event('change', { bubbles: true }));
     element.dispatchEvent(new Event('blur', { bubbles: true }));
     
-    console.log(`[Autofill] Filled input: ${element.name || element.id || 'unknown'} = ${value}`);
+    log(` Filled input: ${element.name || element.id || 'unknown'} = ${value}`);
     return true;
   }
 
@@ -809,7 +848,7 @@
     
     // IMPORTANT: Only fill if the field is currently empty/default
     if (!isFieldEmpty(element)) {
-      console.log(`[Autofill] Skipping non-empty select: ${element.name || element.id || 'unknown'}`);
+      log(` Skipping non-empty select: ${element.name || element.id || 'unknown'}`);
       return false;
     }
     
@@ -851,7 +890,7 @@
     if (match) {
       element.value = match.value;
       element.dispatchEvent(new Event('change', { bubbles: true }));
-      console.log(`[Autofill] Selected: ${match.text}`);
+      log(` Selected: ${match.text}`);
       return true;
     }
     return false;
@@ -929,7 +968,7 @@
   async function fillEEOFields(userData) {
     const results = [];
     
-    console.log('[Autofill] Filling EEO fields...');
+    log(' Filling EEO fields...');
     
     // EEO fields config: name, label keywords, value
     // EEO fields have fixed options, so we DON'T type to search - just open and select
@@ -942,11 +981,11 @@
     
     for (const field of eeoFieldsConfig) {
       if (!field.value || field.value === 'Decline to Self Identify') {
-        console.log(`[Autofill] Skipping ${field.name} (no value or decline)`);
+        log(` Skipping ${field.name} (no value or decline)`);
         continue;
       }
       
-      console.log(`[Autofill] Filling EEO: ${field.name} = ${field.value}`);
+      log(` Filling EEO: ${field.name} = ${field.value}`);
       
       // typeToSearch: false - don't type, just open dropdown and select best match
       if (await fillReactSelectByLabel(field.keywords, field.value, { typeToSearch: false })) {
@@ -961,11 +1000,11 @@
   async function fillEducationFields(userData) {
     const results = [];
     
-    console.log('[Autofill] Filling Education fields...');
+    log(' Filling Education fields...');
     
     // School field - async API, type to search
     if (userData.school) {
-      console.log(`[Autofill] Filling School: ${userData.school}`);
+      log(` Filling School: ${userData.school}`);
       if (await fillReactSelectByLabel(['school'], userData.school, { 
         waitForAsync: true,
         typeToSearch: true  // Type to search API
@@ -977,7 +1016,7 @@
     
     // Degree field - fixed options, don't type
     if (userData.degree) {
-      console.log(`[Autofill] Filling Degree: ${userData.degree}`);
+      log(` Filling Degree: ${userData.degree}`);
       if (await fillReactSelectByLabel(['degree'], userData.degree, {
         typeToSearch: false  // Fixed options
       })) {
@@ -988,7 +1027,7 @@
     
     // Discipline field - may be async
     if (userData.discipline) {
-      console.log(`[Autofill] Filling Discipline: ${userData.discipline}`);
+      log(` Filling Discipline: ${userData.discipline}`);
       if (await fillReactSelectByLabel(['discipline', 'major'], userData.discipline, {
         waitForAsync: true,
         typeToSearch: true  // Type to search API
@@ -1029,7 +1068,7 @@
         if (element) {
           // Check if already filled
           if (!isFieldEmpty(element)) {
-            console.log('[Autofill] Authorized field already filled, skipping');
+            log(' Authorized field already filled, skipping');
             return false;
           }
           
@@ -1041,7 +1080,7 @@
           if (yesOption) {
             element.value = yesOption.value;
             element.dispatchEvent(new Event('change', { bubbles: true }));
-            console.log('[Autofill] Authorized: Yes');
+            log(' Authorized: Yes');
             return true;
           }
         }
@@ -1051,7 +1090,7 @@
   }
 
   async function fillSponsorshipField(needsSponsorship) {
-    console.log(`[Autofill] Filling sponsorship field, needs sponsorship: ${needsSponsorship}`);
+    log(` Filling sponsorship field, needs sponsorship: ${needsSponsorship}`);
     
     // Strategy 1: Try standard select elements first
     for (const selector of SPONSORSHIP_SELECTORS) {
@@ -1059,7 +1098,7 @@
       for (const element of elements) {
         if (element) {
           if (!isFieldEmpty(element)) {
-            console.log('[Autofill] Sponsorship field already filled, skipping');
+            log(' Sponsorship field already filled, skipping');
             return false;
           }
           
@@ -1071,7 +1110,7 @@
           if (match) {
             element.value = match.value;
             element.dispatchEvent(new Event('change', { bubbles: true }));
-            console.log(`[Autofill] Sponsorship (standard select): ${needsSponsorship ? 'Yes' : 'No'}`);
+            log(` Sponsorship (standard select): ${needsSponsorship ? 'Yes' : 'No'}`);
             return true;
           }
         }
@@ -1089,22 +1128,22 @@
 
   async function uploadFile(fileData, inputElement) {
     if (!fileData || !fileData.content) {
-      console.log('[Autofill] No file data to upload');
+      log(' No file data to upload');
       return false;
     }
     if (!inputElement) {
-      console.log('[Autofill] No input element provided');
+      log(' No input element provided');
       return false;
     }
     
     // Check if file already uploaded
     if (inputElement.files && inputElement.files.length > 0) {
-      console.log('[Autofill] File already uploaded to this input, skipping');
+      log(' File already uploaded to this input, skipping');
       return false;
     }
     
     try {
-      console.log(`[Autofill] Attempting to upload: ${fileData.filename}`);
+      log(` Attempting to upload: ${fileData.filename}`);
       
       const byteCharacters = atob(fileData.content);
       const byteNumbers = new Array(byteCharacters.length);
@@ -1117,7 +1156,7 @@
         type: fileData.mimeType || 'application/pdf' 
       });
       
-      console.log(`[Autofill] Created file object: ${file.name}, size: ${file.size}`);
+      log(` Created file object: ${file.name}, size: ${file.size}`);
       
       const dataTransfer = new DataTransfer();
       dataTransfer.items.add(file);
@@ -1125,7 +1164,7 @@
       // Set files
       inputElement.files = dataTransfer.files;
       
-      console.log(`[Autofill] Set files on input, now has ${inputElement.files.length} file(s)`);
+      log(` Set files on input, now has ${inputElement.files.length} file(s)`);
       
       // Trigger events
       inputElement.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1135,14 +1174,14 @@
       await new Promise(r => setTimeout(r, 100));
       
       if (inputElement.files && inputElement.files.length > 0) {
-        console.log(`[Autofill] SUCCESS: Uploaded ${fileData.filename}`);
+        log(` SUCCESS: Uploaded ${fileData.filename}`);
         return true;
       } else {
-        console.log('[Autofill] Upload may have failed - input.files is empty after setting');
+        log(' Upload may have failed - input.files is empty after setting');
         return false;
       }
     } catch (error) {
-      console.error('[Autofill] Upload error:', error);
+      logError(' Upload error:', error);
       return false;
     }
   }
@@ -1150,16 +1189,16 @@
   async function uploadResume(resumeData) {
     if (!resumeData || !resumeData.content) return false;
     
-    console.log('[Autofill] Starting resume upload...');
+    log(' Starting resume upload...');
     
     const fileInputs = document.querySelectorAll('input[type="file"]');
-    console.log(`[Autofill] Found ${fileInputs.length} file input(s)`);
+    log(` Found ${fileInputs.length} file input(s)`);
     
     // Find the resume file input by walking up the DOM
     for (const input of fileInputs) {
       // Skip if already has file
       if (input.files && input.files.length > 0) {
-        console.log('[Autofill] Input already has file, skipping');
+        log(' Input already has file, skipping');
         continue;
       }
       
@@ -1174,7 +1213,7 @@
         // Check for resume/cv keywords
         if (parentText.includes('resume') || parentText.includes('cv')) {
           isResumeInput = true;
-          console.log(`[Autofill] Found resume/cv at depth ${depth}`);
+          log(` Found resume/cv at depth ${depth}`);
         }
         
         // Check if this is actually a cover letter section
@@ -1187,7 +1226,7 @@
       
       // If this input is in resume section (and not cover letter), use it
       if (isResumeInput && !isCoverLetterInput) {
-        console.log('[Autofill] Uploading resume to detected input');
+        log(' Uploading resume to detected input');
         if (await uploadFile(resumeData, input)) {
           return true;
         }
@@ -1216,21 +1255,21 @@
       }
       
       if (!isCoverLetter) {
-        console.log('[Autofill] Using first available file input for resume');
+        log(' Using first available file input for resume');
         if (await uploadFile(resumeData, firstInput)) {
           return true;
         }
       }
     }
     
-    console.log('[Autofill] Failed to find suitable input for resume');
+    log(' Failed to find suitable input for resume');
     return false;
   }
 
   async function uploadCoverLetter(coverLetterData) {
     if (!coverLetterData || !coverLetterData.content) return false;
     
-    console.log('[Autofill] Starting cover letter upload...');
+    log(' Starting cover letter upload...');
     
     const fileInputs = document.querySelectorAll('input[type="file"]');
     
@@ -1262,14 +1301,14 @@
       
       // If this input is in cover letter section (and not resume-only), use it
       if (isCoverLetterInput && !isResumeInput) {
-        console.log('[Autofill] Uploading cover letter to detected input');
+        log(' Uploading cover letter to detected input');
         if (await uploadFile(coverLetterData, input)) {
           return true;
         }
       }
     }
     
-    console.log('[Autofill] Failed to find suitable input for cover letter');
+    log(' Failed to find suitable input for cover letter');
     return false;
   }
 
@@ -1284,7 +1323,7 @@
       coverLetterUploaded: false
     };
     
-    console.log('[Autofill] Starting autofill (will not overwrite existing values)');
+    log(' Starting autofill (will not overwrite existing values)');
     
     // Prepare data
     const dataToFill = { ...userData };
@@ -1351,7 +1390,7 @@
       notif.remove();
     }
     
-    console.log('[Autofill] Results:', results);
+    log(' Results:', results);
     return results;
   }
 
@@ -1374,7 +1413,7 @@
         break;
         
       default:
-        console.log('[Autofill] Unknown message:', message.type);
+        log(' Unknown message:', message.type);
     }
   });
 
@@ -1386,6 +1425,6 @@
   }
 
   chrome.runtime.sendMessage({ type: 'CONTENT_SCRIPT_READY', url: window.location.href });
-  console.log('[Autofill] Content script loaded on:', window.location.href);
+  log(' Content script loaded on:', window.location.href);
   
 })();

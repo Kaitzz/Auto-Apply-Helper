@@ -1,14 +1,11 @@
 // Background Service Worker
 // Handles side panel, message passing, and page detection
 
-// Greenhouse URL patterns
-const GREENHOUSE_PATTERNS = [
-  'boards.greenhouse.io',
-  'job-boards.greenhouse.io',
-  'jobs.greenhouse.io'
-];
+// ==================== Configuration ====================
+const DEBUG = false;
+const log = (...args) => { if (DEBUG) console.log('[Background]', ...args); };
 
-// Other job board patterns
+// Other job board patterns (for future support)
 const JOB_BOARD_PATTERNS = [
   'jobs.lever.co',
   'myworkday.com',
@@ -17,18 +14,35 @@ const JOB_BOARD_PATTERNS = [
   'smartrecruiters.com'
 ];
 
-// Check if URL matches job application patterns
+/**
+ * Check if URL is an actual job application page (not a listing page)
+ * Application pages have /jobs/ followed by a job ID
+ */
 function isJobApplicationPage(url) {
   if (!url) return { isJobPage: false, type: null };
   
   const urlLower = url.toLowerCase();
   
-  for (const pattern of GREENHOUSE_PATTERNS) {
-    if (urlLower.includes(pattern)) {
-      return { isJobPage: true, type: 'greenhouse' };
-    }
+  // Greenhouse: must have /jobs/ followed by a number
+  if (urlLower.includes('greenhouse.io')) {
+    const isApplicationPage = /\/jobs\/\d+/.test(urlLower);
+    return { isJobPage: isApplicationPage, type: isApplicationPage ? 'greenhouse' : null };
   }
   
+  // Lever: check for job ID in path
+  if (urlLower.includes('lever.co')) {
+    const path = new URL(url).pathname;
+    const isApplicationPage = path.split('/').length >= 3 && path.split('/')[2].length > 10;
+    return { isJobPage: isApplicationPage, type: isApplicationPage ? 'lever' : null };
+  }
+  
+  // Workday: check for job/apply page
+  if (urlLower.includes('workday.com')) {
+    const isApplicationPage = urlLower.includes('/job/') || urlLower.includes('/apply');
+    return { isJobPage: isApplicationPage, type: isApplicationPage ? 'workday' : null };
+  }
+  
+  // Other job boards
   for (const pattern of JOB_BOARD_PATTERNS) {
     if (urlLower.includes(pattern)) {
       return { isJobPage: true, type: 'other' };
@@ -44,12 +58,10 @@ async function updateBadgeForTab(tabId, url) {
   
   if (isJobPage) {
     await chrome.action.setBadgeText({ tabId, text: '!' });
-    await chrome.action.setBadgeBackgroundColor({ tabId, color: type === 'greenhouse' ? '#22c55e' : '#3b82f6' });
+    await chrome.action.setBadgeBackgroundColor({ tabId, color: '#22c55e' });
     await chrome.action.setTitle({ 
       tabId, 
-      title: type === 'greenhouse' 
-        ? 'Greenhouse form detected! Click to autofill.' 
-        : 'Job application detected! Click to autofill.'
+      title: 'Application page detected! Click to autofill.'
     });
   } else {
     await chrome.action.setBadgeText({ tabId, text: '' });
@@ -72,7 +84,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
       await updateBadgeForTab(activeInfo.tabId, tab.url);
     }
   } catch (error) {
-    console.log('Could not get tab info:', error);
+    log('Could not get tab info:', error);
   }
 });
 
@@ -116,7 +128,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             coverLetterData: message.coverLetterData
           }, (response) => {
             if (chrome.runtime.lastError) {
-              console.log('Could not send message to content script:', chrome.runtime.lastError);
+              log('Could not send message to content script:', chrome.runtime.lastError);
               sendResponse({ error: 'Content script not available. Try refreshing the page.' });
             } else {
               sendResponse(response);
@@ -151,17 +163,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
       
     case 'CONTENT_SCRIPT_READY':
-      console.log('Content script ready on:', message.url);
+      log('Content script ready on:', message.url);
       break;
       
     default:
-      console.log('Unknown message type:', message.type);
+      log('Unknown message type:', message.type);
   }
 });
 
 // Initialize on install
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('Job Application Autofill extension installed');
+  log('Job Application Autofill extension installed');
 });
 
-console.log('Job Application Autofill background service worker loaded');
+log('Background service worker loaded');

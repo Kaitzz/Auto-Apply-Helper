@@ -80,7 +80,7 @@ const sendMessage = (message) => new Promise((resolve) => {
   if (typeof chrome !== 'undefined' && chrome.runtime) {
     chrome.runtime.sendMessage(message, resolve)
   } else {
-    console.log('Dev mode - message:', message)
+    // Development mode fallback (browser without extension APIs)
     resolve({ success: true })
   }
 })
