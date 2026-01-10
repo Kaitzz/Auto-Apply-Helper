@@ -221,10 +221,25 @@
       'input[aria-label*="Last" i]'
     ],
     'preferred_first_name': [
-      'input[name*="preferred"]',
-      'input[id*="preferred"]',
-      'input[placeholder*="Preferred" i]',
-      'input[name*="nickname"]'
+      // Specific: must contain "preferred" AND "name" together
+      'input[name*="preferred_name"]',
+      'input[name*="preferredName"]',
+      'input[name*="preferred-name"]',
+      'input[name*="preferred_first"]',
+      'input[name*="preferredFirst"]',
+      'input[id*="preferred_name"]',
+      'input[id*="preferredName"]',
+      'input[id*="preferred-name"]',
+      'input[id*="preferred_first"]',
+      'input[id*="preferredFirst"]',
+      // Nickname variants
+      'input[name*="nickname"]',
+      'input[id*="nickname"]',
+      'input[autocomplete="nickname"]',
+      // Placeholder hints
+      'input[placeholder*="Preferred Name" i]',
+      'input[placeholder*="Preferred First" i]',
+      'input[placeholder*="Nickname" i]'
     ],
     'email': [
       'input[name*="email"]', 
@@ -272,9 +287,12 @@
       'input[id*="linked_in" i]'
     ],
     'github': [
-      'input[name*="github"]', 
-      'input[id*="github"]', 
-      'input[placeholder*="github" i]'
+      'input[name*="github" i]', 
+      'input[id*="github" i]', 
+      'input[placeholder*="github" i]',
+      'input[aria-label*="github" i]',
+      'input[name*="git_hub" i]',
+      'input[id*="git_hub" i]'
     ],
     'website': [
       'input[name*="website"]', 
@@ -282,6 +300,18 @@
       'input[id*="website"]',
       'input[placeholder*="Website" i]',
       'input[placeholder*="Portfolio" i]'
+    ],
+    'current_company': [
+      'input[name*="current_company" i]',
+      'input[name*="currentCompany" i]',
+      'input[name*="current-company" i]',
+      'input[id*="current_company" i]',
+      'input[id*="currentCompany" i]',
+      'input[id*="current-company" i]',
+      'input[name*="company" i]',
+      'input[id*="company" i]',
+      'input[placeholder*="Current Company" i]',
+      'input[placeholder*="Company" i]'
     ],
     
     // Education
@@ -316,7 +346,16 @@
   };
 
   // Label-based field detection (excluding EEO - handled separately)
+  // Note: state/province handled separately by fillStateProvince() for React Select
   const LABEL_MAPPINGS = {
+    'first_name': ['first name'],
+    'last_name': ['last name', 'family name', 'surname'],
+    'preferred_first_name': ['preferred name', 'preferred first name', 'nickname', 'goes by'],
+    'email': ['email'],
+    'phone': ['phone', 'telephone', 'mobile'],
+    'current_company': ['current company', 'current employer', 'company'],
+    'github': ['github', 'git hub'],
+    'city': ['city'],
     'school': ['school'],
     'degree': ['degree'],
     'discipline': ['discipline', 'major', 'field of study'],
@@ -325,12 +364,16 @@
     'linkedin': ['linkedin']
   };
 
-  // Work authorization selectors
+  // Work authorization selectors - both standard select and input for React Select
   const AUTHORIZED_SELECTORS = [
-    'select[name*="authorized"]', 
-    'select[id*="authorized"]',
-    'select[name*="legally"]',
-    'select[name*="eligible"]'
+    'select[name*="authorized" i]', 
+    'select[id*="authorized" i]',
+    'select[name*="legally" i]',
+    'select[id*="legally" i]',
+    'select[name*="eligible" i]',
+    'select[id*="eligible" i]',
+    'select[name*="work_in" i]',
+    'select[id*="work_in" i]'
   ];
 
   const SPONSORSHIP_SELECTORS = [
@@ -578,16 +621,35 @@
         else if (valueLower.startsWith(textLower)) {
           score = 85;
         }
-        // Option contains our value
+        // GENDER SPECIAL HANDLING - use word boundary matching
+        // "Male" should match "Cisgender male" but NOT "Cisgender female"
+        else if (valueLower === 'male') {
+          // Check for whole word "male" at end or as separate word
+          if (/\bmale\b/.test(textLower) && !/female/.test(textLower)) {
+            score = 95;
+          }
+        }
+        else if (valueLower === 'female') {
+          // Check for "female" in text
+          if (/\bfemale\b/.test(textLower)) {
+            score = 95;
+          }
+        }
+        else if (valueLower === 'non-binary' || valueLower === 'non binary') {
+          if (textLower.includes('non-binary') || textLower.includes('non binary') || 
+              textLower.includes('nonbinary') || textLower.includes('genderqueer') ||
+              textLower.includes('genderfluid')) {
+            score = 90;
+          }
+        }
+        // Option contains our value (with word boundary check to avoid male/female issue)
         else if (textLower.includes(valueLower)) {
-          score = 70;
-        }
-        // Gender matching
-        else if (valueLower === 'female' && textLower === 'female') {
-          score = 100;
-        }
-        else if (valueLower === 'male' && textLower === 'male') {
-          score = 100;
+          // Penalize if it's a gender mismatch (e.g., "male" in "female")
+          if (valueLower === 'male' && textLower.includes('female')) {
+            score = 0; // Don't match
+          } else {
+            score = 70;
+          }
         }
         // Key word matching for EEO fields
         else if (valueLower.includes('not') && valueLower.includes('veteran') && 
@@ -974,6 +1036,7 @@
     // EEO fields have fixed options, so we DON'T type to search - just open and select
     const eeoFieldsConfig = [
       { name: 'gender', keywords: ['gender'], value: userData.gender },
+      { name: 'pronouns', keywords: ['pronoun'], value: userData.pronouns },
       { name: 'hispanic_latino', keywords: ['hispanic', 'latino'], value: userData.hispanic_latino },
       { name: 'veteran_status', keywords: ['veteran'], value: userData.veteran_status },
       { name: 'disability_status', keywords: ['disability'], value: userData.disability_status }
@@ -1061,15 +1124,198 @@
     return results;
   }
 
-  function fillAuthorizedField() {
+  async function fillStateProvince(userData) {
+    if (!userData.state) return false;
+    
+    log(` Filling State/Province: ${userData.state}`);
+    
+    // Keywords to identify state/province questions (must be specific)
+    const stateKeywords = [
+      'u.s. state or canadian province',
+      'state or canadian province', 
+      'state or province',
+      'which u.s. state',
+      'which state',
+      'which province',
+      'what state',
+      'state do you reside',
+      'province do you reside'
+    ];
+    
+    // First, close any open dropdowns
+    document.body.click();
+    await new Promise(r => setTimeout(r, 200));
+    
+    // Strategy: Find all field containers first, then check which one has state question
+    // This prevents accidentally finding the wrong select-shell
+    const fieldContainers = document.querySelectorAll('.field, [class*="field-wrapper"], [class*="form-field"]');
+    
+    for (const fieldContainer of fieldContainers) {
+      const fieldText = fieldContainer.textContent?.toLowerCase() || '';
+      
+      // Check if this field contains state/province keywords
+      const isStateField = stateKeywords.some(kw => fieldText.includes(kw));
+      if (!isStateField) continue;
+      
+      // Make sure it's not an authorization question that happens to contain "state"
+      if (fieldText.includes('authorized') || fieldText.includes('sponsor') || 
+          fieldText.includes('visa') || fieldText.includes('legally')) {
+        continue;
+      }
+      
+      log(` Found state/province field container`);
+      
+      // Find select-shell ONLY within this specific field container
+      const selectShell = fieldContainer.querySelector('.select-shell, [class*="select-shell"]');
+      
+      if (!selectShell) {
+        log(' No select-shell in this field container');
+        continue;
+      }
+      
+      // Verify this is a state dropdown by checking if options contain state names
+      // First, check if already has a value
+      const existingValue = selectShell.querySelector('.select__single-value');
+      if (existingValue && existingValue.textContent && !existingValue.textContent.includes('Select')) {
+        log(' Already has value:', existingValue.textContent);
+        return false;
+      }
+      
+      // Get input and control elements
+      const input = selectShell.querySelector('input.select__input, input[role="combobox"]');
+      const control = selectShell.querySelector('.select__control') || selectShell;
+      
+      // Focus first
+      if (input) input.focus();
+      await new Promise(r => setTimeout(r, 100));
+      
+      // Open dropdown with pointer events
+      const rect = control.getBoundingClientRect();
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
+      
+      ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(type => {
+        const e = new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          clientX: x,
+          clientY: y,
+          pointerId: 1,
+          pointerType: 'mouse'
+        });
+        control.dispatchEvent(e);
+      });
+      
+      await new Promise(r => setTimeout(r, 300));
+      
+      // Type to search (state list is long)
+      if (input) {
+        input.focus();
+        
+        // Clear existing value
+        input.value = '';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise(r => setTimeout(r, 100));
+        
+        // Type state name character by character
+        for (const char of userData.state) {
+          input.value += char;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          await new Promise(r => setTimeout(r, 50));
+        }
+        
+        await new Promise(r => setTimeout(r, 500));
+      }
+      
+      // Find and click matching option
+      let menu = selectShell.querySelector('.select__menu');
+      if (!menu) {
+        const menuId = input?.getAttribute('aria-controls');
+        if (menuId) {
+          menu = document.getElementById(menuId);
+        }
+      }
+      if (!menu) {
+        menu = document.querySelector('.select__menu');
+      }
+      
+      if (menu) {
+        const options = menu.querySelectorAll('.select__option');
+        const stateLower = userData.state.toLowerCase();
+        
+        for (const opt of options) {
+          const optText = opt.textContent?.toLowerCase() || '';
+          if (optText === stateLower || optText.includes(stateLower)) {
+            // Click using pointer events
+            const optRect = opt.getBoundingClientRect();
+            ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(type => {
+              const e = new PointerEvent(type, {
+                bubbles: true,
+                cancelable: true,
+                view: window,
+                clientX: optRect.left + optRect.width / 2,
+                clientY: optRect.top + optRect.height / 2,
+                pointerId: 1,
+                pointerType: 'mouse'
+              });
+              opt.dispatchEvent(e);
+            });
+            
+            log(` ✓ State/Province filled: ${userData.state}`);
+            await new Promise(r => setTimeout(r, 200));
+            return true;
+          }
+        }
+      }
+      
+      log(' Could not find matching state option');
+    }
+    
+    return false;
+  }
+
+  async function fillAuthorizedField() {
+    log(' Looking for work authorization fields...');
+    
+    // Keywords that indicate work authorization questions (NOT sponsorship)
+    const authKeywords = [
+      'legally authorized',
+      'authorized to work',
+      'legally eligible',
+      'eligible to work',
+      'legally permitted',
+      'permitted to work',
+      'work authorization',
+      'right to work',
+      'lawfully authorized',
+      'legal right to work',
+      'employment eligibility',
+      'legally able to work'
+    ];
+    
+    // Keywords that indicate it's a sponsorship question (should be handled separately)
+    const sponsorshipKeywords = ['sponsor', 'visa', 'h1b', 'h-1b', 'immigration'];
+    
+    // Strategy 1: Try standard select elements first
     for (const selector of AUTHORIZED_SELECTORS) {
       const elements = document.querySelectorAll(selector);
       for (const element of elements) {
         if (element) {
+          // Find the label/question text for this field
+          const container = element.closest('.field, .form-group, .question, [class*="field"]') || element.parentElement;
+          const labelText = container ? container.textContent.toLowerCase() : '';
+          
+          // Skip if this is actually a sponsorship question
+          if (sponsorshipKeywords.some(kw => labelText.includes(kw))) {
+            log(' Skipping - this is a sponsorship question');
+            continue;
+          }
+          
           // Check if already filled
           if (!isFieldEmpty(element)) {
             log(' Authorized field already filled, skipping');
-            return false;
+            continue;
           }
           
           const options = Array.from(element.options);
@@ -1080,12 +1326,100 @@
           if (yesOption) {
             element.value = yesOption.value;
             element.dispatchEvent(new Event('change', { bubbles: true }));
-            log(' Authorized: Yes');
+            log(' Authorized (standard select): Yes');
             return true;
           }
         }
       }
     }
+    
+    // Strategy 2: Find ALL labels that match authorization keywords
+    const allLabels = document.querySelectorAll('label, .field-label, [class*="label"], [class*="question"]');
+    
+    for (const label of allLabels) {
+      const labelText = label.textContent.toLowerCase();
+      
+      // Check if this label mentions authorization (but NOT sponsorship)
+      const isAuthQuestion = authKeywords.some(kw => labelText.includes(kw));
+      const isSponsorshipQuestion = sponsorshipKeywords.some(kw => labelText.includes(kw));
+      
+      if (isAuthQuestion && !isSponsorshipQuestion) {
+        log(` Found authorization question: "${label.textContent.substring(0, 60)}..."`);
+        
+        // Look for React Select in the same container
+        const container = label.closest('.field, .form-group, .question, [class*="field"]') || label.parentElement;
+        if (!container) continue;
+        
+        const selectShell = container.querySelector('[class*="select__"], [class*="-control"], [class*="Select"]');
+        
+        if (selectShell) {
+          // Use pointer events to open dropdown
+          const control = selectShell.querySelector('[class*="-control"]') || selectShell;
+          const rect = control.getBoundingClientRect();
+          const x = rect.left + rect.width / 2;
+          const y = rect.top + rect.height / 2;
+          
+          // Close any existing dropdowns first
+          document.body.click();
+          await new Promise(r => setTimeout(r, 200));
+          
+          // Open dropdown with pointer events
+          ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(type => {
+            const event = new PointerEvent(type, {
+              bubbles: true,
+              cancelable: true,
+              view: window,
+              clientX: x,
+              clientY: y,
+              pointerId: 1,
+              pointerType: 'mouse'
+            });
+            control.dispatchEvent(event);
+          });
+          
+          await new Promise(r => setTimeout(r, 300));
+          
+          // Find and click "Yes" option
+          const menu = document.querySelector('[class*="select__menu"], [class*="-menu"]');
+          if (menu) {
+            const options = menu.querySelectorAll('[class*="option"]');
+            for (const opt of options) {
+              const optText = opt.textContent.toLowerCase();
+              if (optText.includes('yes')) {
+                opt.click();
+                log(' Authorized (React Select): Yes');
+                await new Promise(r => setTimeout(r, 200));
+                return true;
+              }
+            }
+          }
+        }
+        
+        // Also check for standard select in container
+        const standardSelect = container.querySelector('select');
+        if (standardSelect && isFieldEmpty(standardSelect)) {
+          const options = Array.from(standardSelect.options);
+          const yesOption = options.find(opt => 
+            opt.text.toLowerCase().includes('yes') || opt.value.toLowerCase() === 'yes'
+          );
+          if (yesOption) {
+            standardSelect.value = yesOption.value;
+            standardSelect.dispatchEvent(new Event('change', { bubbles: true }));
+            log(' Authorized (found via label): Yes');
+            return true;
+          }
+        }
+      }
+    }
+    
+    // Strategy 3: Fallback - try React Select with keywords
+    for (const keyword of authKeywords.slice(0, 5)) { // Try first 5 keywords
+      if (await fillReactSelectByLabel([keyword], 'Yes', { typeToSearch: false })) {
+        log(` Authorized (React Select via "${keyword}"): Yes`);
+        return true;
+      }
+    }
+    
     return false;
   }
 
@@ -1336,7 +1670,7 @@
     // They usually handle location differently, so we skip these to avoid wrong matches
     const standardFields = [
       'first_name', 'last_name', 'preferred_first_name', 'email',
-      'linkedin', 'github', 'website'
+      'current_company', 'linkedin', 'github', 'website'
     ];
     
     for (const fieldName of standardFields) {
@@ -1361,12 +1695,17 @@
     const eduResults = await fillEducationFields(dataToFill);
     results.filled.push(...eduResults);
     
+    // Fill state/province field (React Select)
+    if (await fillStateProvince(dataToFill)) {
+      results.filled.push('state');
+    }
+    
     // Fill EEO fields
     const eeoResults = await fillEEOFields(dataToFill);
     results.filled.push(...eeoResults);
     
     // Work authorization - always Yes
-    if (fillAuthorizedField()) {
+    if (await fillAuthorizedField()) {
       results.filled.push('authorized');
     }
     

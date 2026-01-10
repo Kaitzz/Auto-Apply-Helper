@@ -39,6 +39,80 @@ const DEGREE_OPTIONS = [
   { value: 'Other', label: 'Other' }
 ]
 
+// US States
+const US_STATES = [
+  { value: '', label: 'Select...' },
+  { value: 'Alabama', label: 'Alabama' },
+  { value: 'Alaska', label: 'Alaska' },
+  { value: 'Arizona', label: 'Arizona' },
+  { value: 'Arkansas', label: 'Arkansas' },
+  { value: 'California', label: 'California' },
+  { value: 'Colorado', label: 'Colorado' },
+  { value: 'Connecticut', label: 'Connecticut' },
+  { value: 'Delaware', label: 'Delaware' },
+  { value: 'District of Columbia', label: 'District of Columbia' },
+  { value: 'Florida', label: 'Florida' },
+  { value: 'Georgia', label: 'Georgia' },
+  { value: 'Hawaii', label: 'Hawaii' },
+  { value: 'Idaho', label: 'Idaho' },
+  { value: 'Illinois', label: 'Illinois' },
+  { value: 'Indiana', label: 'Indiana' },
+  { value: 'Iowa', label: 'Iowa' },
+  { value: 'Kansas', label: 'Kansas' },
+  { value: 'Kentucky', label: 'Kentucky' },
+  { value: 'Louisiana', label: 'Louisiana' },
+  { value: 'Maine', label: 'Maine' },
+  { value: 'Maryland', label: 'Maryland' },
+  { value: 'Massachusetts', label: 'Massachusetts' },
+  { value: 'Michigan', label: 'Michigan' },
+  { value: 'Minnesota', label: 'Minnesota' },
+  { value: 'Mississippi', label: 'Mississippi' },
+  { value: 'Missouri', label: 'Missouri' },
+  { value: 'Montana', label: 'Montana' },
+  { value: 'Nebraska', label: 'Nebraska' },
+  { value: 'Nevada', label: 'Nevada' },
+  { value: 'New Hampshire', label: 'New Hampshire' },
+  { value: 'New Jersey', label: 'New Jersey' },
+  { value: 'New Mexico', label: 'New Mexico' },
+  { value: 'New York', label: 'New York' },
+  { value: 'North Carolina', label: 'North Carolina' },
+  { value: 'North Dakota', label: 'North Dakota' },
+  { value: 'Ohio', label: 'Ohio' },
+  { value: 'Oklahoma', label: 'Oklahoma' },
+  { value: 'Oregon', label: 'Oregon' },
+  { value: 'Pennsylvania', label: 'Pennsylvania' },
+  { value: 'Rhode Island', label: 'Rhode Island' },
+  { value: 'South Carolina', label: 'South Carolina' },
+  { value: 'South Dakota', label: 'South Dakota' },
+  { value: 'Tennessee', label: 'Tennessee' },
+  { value: 'Texas', label: 'Texas' },
+  { value: 'Utah', label: 'Utah' },
+  { value: 'Vermont', label: 'Vermont' },
+  { value: 'Virginia', label: 'Virginia' },
+  { value: 'Washington', label: 'Washington' },
+  { value: 'West Virginia', label: 'West Virginia' },
+  { value: 'Wisconsin', label: 'Wisconsin' },
+  { value: 'Wyoming', label: 'Wyoming' }
+]
+
+// Canadian Provinces and Territories
+const CA_PROVINCES = [
+  { value: '', label: 'Select...' },
+  { value: 'Alberta', label: 'Alberta' },
+  { value: 'British Columbia', label: 'British Columbia' },
+  { value: 'Manitoba', label: 'Manitoba' },
+  { value: 'New Brunswick', label: 'New Brunswick' },
+  { value: 'Newfoundland and Labrador', label: 'Newfoundland and Labrador' },
+  { value: 'Northwest Territories', label: 'Northwest Territories' },
+  { value: 'Nova Scotia', label: 'Nova Scotia' },
+  { value: 'Nunavut', label: 'Nunavut' },
+  { value: 'Ontario', label: 'Ontario' },
+  { value: 'Prince Edward Island', label: 'Prince Edward Island' },
+  { value: 'Quebec', label: 'Quebec' },
+  { value: 'Saskatchewan', label: 'Saskatchewan' },
+  { value: 'Yukon', label: 'Yukon' }
+]
+
 // Generate year options (current year back to 1970)
 const currentYear = new Date().getFullYear()
 const YEAR_OPTIONS = [
@@ -100,6 +174,7 @@ function App() {
     state: '',
     zip: '',
     // Professional
+    current_company: '',
     linkedin: '',
     github: '',
     website: '',
@@ -113,6 +188,7 @@ function App() {
     edu_end_year: '',
     // Demographics (EEO)
     gender: 'Decline to Self Identify',
+    pronouns: 'Decline to Self Identify',
     hispanic_latino: 'Decline to Self Identify',
     veteran_status: 'Decline to Self Identify',
     disability_status: 'Decline to Self Identify'
@@ -416,11 +492,12 @@ function App() {
                 value={formData.city}
                 onChange={handleInputChange}
               />
-              <InputField
-                label="State"
+              <SelectField
+                label="State/Province"
                 name="state"
                 value={formData.state}
                 onChange={handleInputChange}
+                options={formData.country === 'Canada' ? CA_PROVINCES : US_STATES}
               />
               <InputField
                 label="ZIP"
@@ -435,6 +512,13 @@ function App() {
 
         {activeTab === 'work' && (
           <>
+            <InputField
+              label="Current Company"
+              name="current_company"
+              value={formData.current_company}
+              onChange={handleInputChange}
+              placeholder="e.g., Google, Amazon, Startup Inc."
+            />
             <InputField
               label="LinkedIn URL"
               name="linkedin"
@@ -537,6 +621,19 @@ function App() {
                 { value: 'Male', label: 'Male' },
                 { value: 'Female', label: 'Female' },
                 { value: 'Non-Binary', label: 'Non-Binary' }
+              ]}
+            />
+            <SelectField
+              label="Pronouns"
+              name="pronouns"
+              value={formData.pronouns}
+              onChange={handleInputChange}
+              options={[
+                { value: 'Decline to Self Identify', label: 'Decline to Self Identify' },
+                { value: 'He/him/his', label: 'He/him/his' },
+                { value: 'She/her/hers', label: 'She/her/hers' },
+                { value: 'They/them/theirs', label: 'They/them/theirs' },
+                { value: 'I prefer not to say', label: 'I prefer not to say' }
               ]}
             />
             <SelectField
