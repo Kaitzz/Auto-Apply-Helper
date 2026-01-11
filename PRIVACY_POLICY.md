@@ -1,10 +1,10 @@
-# Privacy Policy for Job Application Autofill
+# Privacy Policy
 
 **Last Updated: January 2025**
 
 ## Overview
 
-Job Application Autofill ("the Extension") is a browser extension that helps users automatically fill job application forms. This privacy policy explains how we handle your information.
+Auto-Apply Helper BETA ("the Extension") is a browser extension that helps users automatically fill certain fields of job application forms. This privacy policy explains how we handle your information.
 
 ## Data Collection
 
