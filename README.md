@@ -1,6 +1,6 @@
-# Job Application Autofill
+# Auto-Apply Helper BETA
 
-A Chrome extension that automatically fills job application forms on various ATS (Applicant Tracking System) platforms.
+A Chrome extension that helps you automatically fills job application forms on various ATS (Applicant Tracking System) platforms.
 
 ## Features
 
