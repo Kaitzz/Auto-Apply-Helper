@@ -30,8 +30,6 @@ const WORK_AUTH_OPTIONS = [
 // Degree options
 const DEGREE_OPTIONS = [
   { value: '', label: 'Select...' },
-  { value: 'High School', label: 'High School' },
-  { value: "Associate's Degree", label: "Associate's Degree" },
   { value: "Bachelor's Degree", label: "Bachelor's Degree" },
   { value: "Master's Degree", label: "Master's Degree" },
   { value: 'Master of Business Administration', label: 'MBA' },
@@ -113,15 +111,34 @@ const CA_PROVINCES = [
   { value: 'Yukon', label: 'Yukon' }
 ]
 
-// Generate year options (current year back to 1970)
+// Generate year options (current year back to 2000)
 const currentYear = new Date().getFullYear()
 const YEAR_OPTIONS = [
   { value: '', label: 'Select...' },
-  ...Array.from({ length: currentYear - 1969 }, (_, i) => ({
+  ...Array.from({ length: currentYear - 1999 }, (_, i) => ({
     value: String(currentYear - i),
     label: String(currentYear - i)
   }))
 ]
+
+const LGBTQ_OPTIONS = [
+  { label: "Prefer not to say", value: "Prefer not to say" },
+  { label: "No", value: "No" },
+  { label: "Yes", value: "Yes" },
+];
+
+const RACE_ETHNICITY_OPTIONS = [
+  { label: "Prefer not to say", value: "Prefer not to say" },
+  { label: "East Asian", value: "East Asian" },
+  { label: "South Asian", value: "South Asian" },
+  { label: "Southeast Asian", value: "Southeast Asian" },
+  { label: "White", value: "White" },
+  { label: "Black or African American", value: "Black or African American" },
+  { label: "Hispanic or Latino", value: "Hispanic or Latino" },
+  { label: "Native Hawaiian or Other Pacific Islander", value: "Native Hawaiian or Other Pacific Islander" },
+  { label: "American Indian or Alaska Native", value: "American Indian or Alaska Native" },
+  { label: "Other", value: "Other" },
+];
 
 // Chrome storage helper
 const storage = {
@@ -189,7 +206,9 @@ function App() {
     // Demographics (EEO)
     gender: 'Decline to Self Identify',
     pronouns: 'Decline to Self Identify',
+    lgbtq: "Prefer not to say",
     hispanic_latino: 'Decline to Self Identify',
+    race_ethnicity: "Prefer not to say",
     veteran_status: 'Decline to Self Identify',
     disability_status: 'Decline to Self Identify'
   })
@@ -331,7 +350,7 @@ function App() {
       setStatus({ type: 'error', message: 'Error: ' + error.message })
     }
     
-    setTimeout(() => setStatus({ type: '', message: '' }), 5000)
+    setTimeout(() => setStatus({ type: '', message: '' }), 12000)
   }
 
   const tabs = [
@@ -637,6 +656,13 @@ function App() {
               ]}
             />
             <SelectField
+              label="Do you identify as LGBTQ+?"
+              name="lgbtq"
+              value={formData.lgbtq || ""}
+              options={LGBTQ_OPTIONS}
+              onChange={handleInputChange}
+            />
+            <SelectField
               label="Are you Hispanic/Latino?"
               name="hispanic_latino"
               value={formData.hispanic_latino}
@@ -646,6 +672,13 @@ function App() {
                 { value: 'Yes', label: 'Yes' },
                 { value: 'No', label: 'No' }
               ]}
+            />
+            <SelectField
+              label="Race / Ethnicity"
+              name="race_ethnicity"
+              value={formData.race_ethnicity || ""}
+              options={RACE_ETHNICITY_OPTIONS}
+              onChange={handleInputChange}
             />
             <SelectField
               label="Veteran Status"

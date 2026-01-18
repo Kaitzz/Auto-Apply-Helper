@@ -7,11 +7,11 @@
   // ==================== Configuration ====================
   
   // Set to false for production release
-  const DEBUG = false;
+  const DEBUG = true;
   
   // Conditional logging - only logs when DEBUG is true
-  const log = (...args) => { if (DEBUG) log('', ...args); };
-  const logError = (...args) => { logError('', ...args); }; // Always log errors
+  const log = (...args) => { if (DEBUG) console.log('[JobAutofill]', ...args); };
+  const logError = (...args) => { console.error('[JobAutofill]', ...args); };
 
   // Prevent multiple injections
   if (window.__jobAutofillLoaded) return;
@@ -21,7 +21,6 @@
   
   /**
    * Check if current page is an actual job application page (not a listing page)
-   * Application pages have /jobs/ followed by a job ID in the URL
    */
   function isApplicationPage() {
     const url = window.location.href;
@@ -30,12 +29,6 @@
     // Greenhouse: must have /jobs/ followed by a number
     if (window.location.hostname.includes('greenhouse.io')) {
       return /\/jobs\/\d+/.test(path);
-    }
-    
-    // Lever: must have a job ID in the path
-    if (window.location.hostname.includes('lever.co')) {
-      // Lever job pages look like: /company/job-id-uuid
-      return path.split('/').length >= 3 && path.split('/')[2].length > 10;
     }
     
     // Workday: check for job apply page
@@ -221,25 +214,10 @@
       'input[aria-label*="Last" i]'
     ],
     'preferred_first_name': [
-      // Specific: must contain "preferred" AND "name" together
-      'input[name*="preferred_name"]',
-      'input[name*="preferredName"]',
-      'input[name*="preferred-name"]',
-      'input[name*="preferred_first"]',
-      'input[name*="preferredFirst"]',
-      'input[id*="preferred_name"]',
-      'input[id*="preferredName"]',
-      'input[id*="preferred-name"]',
-      'input[id*="preferred_first"]',
-      'input[id*="preferredFirst"]',
-      // Nickname variants
-      'input[name*="nickname"]',
-      'input[id*="nickname"]',
-      'input[autocomplete="nickname"]',
-      // Placeholder hints
-      'input[placeholder*="Preferred Name" i]',
-      'input[placeholder*="Preferred First" i]',
-      'input[placeholder*="Nickname" i]'
+      'input[name*="preferred"]',
+      'input[id*="preferred"]',
+      'input[placeholder*="Preferred" i]',
+      'input[name*="nickname"]'
     ],
     'email': [
       'input[name*="email"]', 
@@ -278,6 +256,13 @@
     ],
     
     // Professional - improved LinkedIn detection
+    'current_company': [
+      'input[name="current_company"]',
+      'input[name*="current_company" i]',
+      'input[id*="current_company" i]',
+      'input[aria-label*="current company" i]',
+      'input[placeholder*="current company" i]'
+    ],
     'linkedin': [
       'input[name*="linkedin" i]', 
       'input[id*="linkedin" i]', 
@@ -287,12 +272,9 @@
       'input[id*="linked_in" i]'
     ],
     'github': [
-      'input[name*="github" i]', 
-      'input[id*="github" i]', 
-      'input[placeholder*="github" i]',
-      'input[aria-label*="github" i]',
-      'input[name*="git_hub" i]',
-      'input[id*="git_hub" i]'
+      'input[name*="github"]', 
+      'input[id*="github"]', 
+      'input[placeholder*="github" i]'
     ],
     'website': [
       'input[name*="website"]', 
@@ -300,18 +282,6 @@
       'input[id*="website"]',
       'input[placeholder*="Website" i]',
       'input[placeholder*="Portfolio" i]'
-    ],
-    'current_company': [
-      'input[name*="current_company" i]',
-      'input[name*="currentCompany" i]',
-      'input[name*="current-company" i]',
-      'input[id*="current_company" i]',
-      'input[id*="currentCompany" i]',
-      'input[id*="current-company" i]',
-      'input[name*="company" i]',
-      'input[id*="company" i]',
-      'input[placeholder*="Current Company" i]',
-      'input[placeholder*="Company" i]'
     ],
     
     // Education
@@ -345,35 +315,28 @@
     ]
   };
 
-  // Label-based field detection (excluding EEO - handled separately)
-  // Note: state/province handled separately by fillStateProvince() for React Select
+  // Label-based field detection (excluding EEO)
   const LABEL_MAPPINGS = {
-    'first_name': ['first name'],
-    'last_name': ['last name', 'family name', 'surname'],
-    'preferred_first_name': ['preferred name', 'preferred first name', 'nickname', 'goes by'],
-    'email': ['email'],
-    'phone': ['phone', 'telephone', 'mobile'],
-    'current_company': ['current company', 'current employer', 'company'],
-    'github': ['github', 'git hub'],
-    'city': ['city'],
+    'preferred_first_name': ['preferred name', 'preferred first name'],
     'school': ['school'],
     'degree': ['degree'],
     'discipline': ['discipline', 'major', 'field of study'],
     'edu_start_year': ['start date year', 'start year'],
     'edu_end_year': ['end date year', 'end year', 'graduation'],
-    'linkedin': ['linkedin']
+    'current_company': ['current company', 'current employer', 'most recent company'],
+    'linkedin': ['linkedin'],
+    'github': ['github', 'github profile', 'github url'],
+    'website': ['website', 'portfolio', 'portfolio website', 'personal website', 'personal site', 'portfolio url'],
+    'lgbtq': ['lgbtq', 'lgbtq+', 'identify as lgbtq', 'sexual orientation', 'lgbt'],
+    'race_ethnicity': ['race', 'ethnicity', 'race/ethnicity', 'identify your race']
   };
 
-  // Work authorization selectors - both standard select and input for React Select
+  // Work authorization selectors
   const AUTHORIZED_SELECTORS = [
-    'select[name*="authorized" i]', 
-    'select[id*="authorized" i]',
-    'select[name*="legally" i]',
-    'select[id*="legally" i]',
-    'select[name*="eligible" i]',
-    'select[id*="eligible" i]',
-    'select[name*="work_in" i]',
-    'select[id*="work_in" i]'
+    'select[name*="authorized"]', 
+    'select[id*="authorized"]',
+    'select[name*="legally"]',
+    'select[name*="eligible"]'
   ];
 
   const SPONSORSHIP_SELECTORS = [
@@ -404,10 +367,6 @@
       return { type: 'greenhouse', detected: true };
     }
     
-    if (window.location.hostname.includes('lever.co')) {
-      return { type: 'lever', detected: true };
-    }
-    
     if (window.location.hostname.includes('workday.com')) {
       return { type: 'workday', detected: true };
     }
@@ -419,10 +378,152 @@
   }
 
   // ==================== React Select Handler ====================
+  function cleanLabelText(s) {
+    return (s || "")
+      .replace(/\*/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function labelTextForInput(el) {
+    if (!el) return "";
+
+    // 1) aria-label
+    const ariaLabel = el.getAttribute?.("aria-label");
+    if (ariaLabel) return cleanLabelText(ariaLabel);
+
+    // 2) aria-labelledby (can be multiple ids)
+    const labelledBy = el.getAttribute?.("aria-labelledby");
+    if (labelledBy) {
+      const parts = labelledBy
+        .split(/\s+/)
+        .map(id => document.getElementById(id)?.textContent || "")
+        .map(cleanLabelText)
+        .filter(Boolean);
+      if (parts.length) return parts.join(" ");
+    }
+
+    // 3) <label for="...">
+    if (el.id) {
+      const lab = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+      if (lab?.textContent) return cleanLabelText(lab.textContent);
+    }
+
+    // 4) nearest container label
+    const container =
+      el.closest(".select__container, .input-wrapper, .field, .question, .form-group") ||
+      el.parentElement;
+    if (container) {
+      const lab = container.querySelector("label");
+      if (lab?.textContent) return cleanLabelText(lab.textContent);
+    }
+
+    return "";
+  }
+
+  function matchesAnyKeyword(labelText, keywords) {
+    const t = (labelText || '').toLowerCase();
+    return keywords.some(k => t.includes(k.toLowerCase()));
+  }
+
+  function getInputGroupByName(name) {
+    return Array.from(document.querySelectorAll(`input[name="${CSS.escape(name)}"]`));
+  }
+
+  function clickRadioByText(radios, desired) {
+    const d = (desired || '').toLowerCase();
+    for (const r of radios) {
+      const id = r.id;
+      const lab = id ? document.querySelector(`label[for="${CSS.escape(id)}"]`) : null;
+      const txt = (lab?.textContent || '').toLowerCase();
+      if (txt.includes(d)) {
+        r.click();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function reactSelectHasAnySelection(inputEl) {
+    const root =
+      inputEl.closest('.select__control') ||
+      inputEl.closest('.select__container') ||
+      inputEl.closest('.select') ||
+      inputEl.parentElement;
+
+    if (!root) return false;
+
+    // react-select single-value:
+    const single = root.querySelector('.select__single-value');
+    if (single && (single.textContent || '').trim()) return true;
+
+    // react-select multi-value chips:
+    const multi = root.querySelectorAll('.select__multi-value, .select__multi-value__label');
+    for (const el of multi) {
+      if ((el.textContent || '').trim()) return true;
+    }
+
+    return false;
+  }
+
+  async function fillByLabelKeywords(keywords, desiredValue, opts = {}) {
+    if (!desiredValue) return false;
+    const { skipIfSelected = false } = opts;
+
+    // A) react-select combobox
+    const comboInputs = Array.from(document.querySelectorAll('input.select__input[role="combobox"]'));
+    for (const input of comboInputs) {
+      const lab = labelTextForInput(input);
+      if (!matchesAnyKeyword(lab, keywords)) continue;
+
+      if (skipIfSelected && reactSelectHasAnySelection(input)) {
+        continue;
+      }
+
+      const ok = await selectReactSelectValue(input, [desiredValue]);
+      if (ok) return true;
+    }
+
+    // B) native select
+    const selects = Array.from(document.querySelectorAll('select'));
+    for (const sel of selects) {
+      const lab = labelTextForInput(sel);
+      if (!matchesAnyKeyword(lab, keywords)) continue;
+      if (!isFieldEmpty(sel)) continue;
+      const ok = fillSelectField(sel, desiredValue);
+      if (ok) return true;
+    }
+
+    // C) radio group (common for yes/no)
+    // heuristic: find radios in same "field" container whose label matches keywords
+    const allRadios = Array.from(document.querySelectorAll('input[type="radio"]'));
+    for (const r of allRadios) {
+      const container = r.closest('.field, .form-group, .question, [class*="field"], [class*="question"]') || r.parentElement;
+      const containerText = (container?.innerText || '').toLowerCase();
+      if (!matchesAnyKeyword(containerText, keywords)) continue;
+
+      const group = getInputGroupByName(r.name);
+      if (group.length) {
+        if (clickRadioByText(group, desiredValue)) return true;
+      }
+    }
+
+    // D) text input fallback
+    const textInputs = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'));
+    for (const input of textInputs) {
+      const lab = labelTextForInput(input);
+      if (!matchesAnyKeyword(lab, keywords)) continue;
+      if (!isFieldEmpty(input)) continue;
+      const ok = fillInputField(input, desiredValue);
+      if (ok) return true;
+    }
+
+    return false;
+  }
+
   
   /**
    * Fill a React Select (combobox) field by label text
-   * 
    * Two modes:
    * - Search mode (typeToSearch=true): Type value, wait for results, click best match
    * - Select mode (typeToSearch=false): Open dropdown, find best match in options, click it
@@ -430,7 +531,7 @@
   async function fillReactSelectByLabel(labelKeywords, value, options = {}) {
     if (!value) return false;
     
-    const { waitForAsync = false, typeToSearch = true } = options;
+    const { waitForAsync = false, typeToSearch = true, labelExcludes = [] } = options;
     
     log(` React Select: keywords=[${labelKeywords.join(', ')}], value="${value}", typeToSearch=${typeToSearch}`);
     
@@ -439,14 +540,19 @@
     await new Promise(r => setTimeout(r, 200));
     
     const labels = document.querySelectorAll('label');
-    
+    let filledCount = 0;
     for (const label of labels) {
-      const labelText = label.textContent?.toLowerCase() || '';
-      
+      const labelText = (label.textContent || '').toLowerCase();
+
+      // Patch 4 (inside the loop, after labelText exists)
+      if (labelExcludes.some(ex => labelText.includes((ex || '').toLowerCase()))) {
+        continue;
+      }
+
       // Check if label matches any keyword
-      const matches = labelKeywords.some(kw => labelText.includes(kw.toLowerCase()));
+      const matches = labelKeywords.some(kw => labelText.includes((kw || '').toLowerCase()));
       if (!matches) continue;
-      
+
       log(` Found label: "${labelText.substring(0, 60)}"`);
       
       // Greenhouse: label is inside select__container, select-shell is sibling
@@ -465,7 +571,7 @@
       const existingValue = selectShell.querySelector('.select__single-value');
       if (existingValue && existingValue.textContent && !existingValue.textContent.includes('Select')) {
         log(' Already has value:', existingValue.textContent);
-        return false;
+        continue;
       }
       
       // Get input for later use
@@ -621,35 +727,23 @@
         else if (valueLower.startsWith(textLower)) {
           score = 85;
         }
-        // GENDER SPECIAL HANDLING - use word boundary matching
-        // "Male" should match "Cisgender male" but NOT "Cisgender female"
-        else if (valueLower === 'male') {
-          // Check for whole word "male" at end or as separate word
-          if (/\bmale\b/.test(textLower) && !/female/.test(textLower)) {
-            score = 95;
-          }
+        // Prevent male/female substring collision (male ⊂ feMALE)
+        else if (valueLower === 'male' && /\bfemale\b/i.test(textLower)) {
+          score = 0; // or `continue;` if you're inside a for-loop over options
         }
-        else if (valueLower === 'female') {
-          // Check for "female" in text
-          if (/\bfemale\b/.test(textLower)) {
-            score = 95;
-          }
+        else if (valueLower === 'female' && /\bmale\b/i.test(textLower)) {
+          score = 0;
         }
-        else if (valueLower === 'non-binary' || valueLower === 'non binary') {
-          if (textLower.includes('non-binary') || textLower.includes('non binary') || 
-              textLower.includes('nonbinary') || textLower.includes('genderqueer') ||
-              textLower.includes('genderfluid')) {
-            score = 90;
-          }
-        }
-        // Option contains our value (with word boundary check to avoid male/female issue)
+        // Option contains our value
         else if (textLower.includes(valueLower)) {
-          // Penalize if it's a gender mismatch (e.g., "male" in "female")
-          if (valueLower === 'male' && textLower.includes('female')) {
-            score = 0; // Don't match
-          } else {
-            score = 70;
-          }
+          score = 70;
+        }
+        // Gender matching
+        else if (valueLower === 'female' && textLower === 'female') {
+          score = 100;
+        }
+        else if (valueLower === 'male' && textLower === 'male') {
+          score = 100;
         }
         // Key word matching for EEO fields
         else if (valueLower.includes('not') && valueLower.includes('veteran') && 
@@ -714,7 +808,8 @@
           // Close any remaining dropdowns
           document.body.click();
           await new Promise(r => setTimeout(r, 200));
-          return true;
+          filledCount++;
+          continue;
         } else {
           log(' Selection not confirmed');
         }
@@ -728,7 +823,7 @@
       await new Promise(r => setTimeout(r, 300));
     }
     
-    return false;
+    return filledCount > 0;
   }
   
   // ==================== Helper: Check if field is empty ====================
@@ -958,6 +1053,219 @@
     return false;
   }
 
+  // ============== Greenhouse React-Select Helpers ==================
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  function normText(s) {
+    return (s || '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .replace(/[^a-z0-9 ]/g, ' ')
+      .trim();
+  }
+
+  function escapeRegExp(s) {
+    return (s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function hasWholeWord(text, word) {
+  const w = (word || '').toLowerCase().trim();
+  if (!w) return false;
+  return new RegExp(`\\b${escapeRegExp(w)}\\b`, 'i').test(text);
+}
+
+  function normalizeToken(s) {
+    return (s || "").toLowerCase().trim();
+  }
+
+  function setNativeInputValue(input, value) {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function dispatchMouseLikeClick(el) {
+    const r = el.getBoundingClientRect();
+    const x = r.left + r.width / 2;
+    const y = r.top + r.height / 2;
+    ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(type => {
+      const Ctor = type.startsWith('pointer') ? PointerEvent : MouseEvent;
+      el.dispatchEvent(new Ctor(type, {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: x,
+        clientY: y,
+        pointerId: 1,
+        pointerType: 'mouse'
+      }));
+    });
+  }
+
+  function isReactSelectComboboxInput(inputEl) {
+    return inputEl &&
+      inputEl.tagName === 'INPUT' &&
+      inputEl.getAttribute('role') === 'combobox' &&
+      inputEl.classList.contains('select__input');
+  }
+
+  function getReactSelectListbox(inputEl) {
+    const id = inputEl?.id;
+    if (!id) return null;
+    return document.getElementById(`react-select-${id}-listbox`);
+  }
+
+  function getReactSelectOptions(inputEl) {
+    const lb = getReactSelectListbox(inputEl);
+    return lb ? Array.from(lb.querySelectorAll('[role="option"]')) : [];
+  }
+
+  function findBestOption(options, desiredValue) {
+    const search = (desiredValue || '').toLowerCase().trim();
+    if (!search) return { best: options[0] || null, bestScore: 0 };
+
+    let best = null;
+    let bestScore = -1;
+
+    for (const opt of options) {
+      const text = (opt.textContent || '').toLowerCase().trim();
+      if (!text) continue;
+
+      // HARD BLOCKS for male/female substring collisions
+      if (search === 'male' && /\bfemale\b/i.test(text)) continue;
+      if (search === 'female' && /\bmale\b/i.test(text)) continue;
+
+      let score = 0;
+
+      // 1) Exact
+      if (text === search) score = 100;
+
+      // 2) Whole-word match (best for "cisgender male" when searching "male")
+      else if (hasWholeWord(text, search)) score = 90;
+
+      // 3) Starts with
+      else if (text.startsWith(search)) score = 80;
+
+      // 4) Loose substring ONLY if the search is not a tiny token
+      else if (search.length >= 5 && text.includes(search)) score = 50;
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = opt;
+      } else if (score === bestScore && best) {
+        // tie-breaker: prefer shorter text
+        if (text.length < (best.textContent || '').length) best = opt;
+      }
+    }
+
+    return { best: best || options[0] || null, bestScore: best ? bestScore : 0 };
+  }
+
+  function genderCandidates(genderValue) {
+    const g = (genderValue || '').toLowerCase().trim();
+    if (!g) return [];
+
+    // Normalize common values from your side panel
+    if (g === 'male' || g === 'man') {
+      return ['cisgender male', 'cis male', 'male', 'man'];
+    }
+
+    if (g === 'female' || g === 'woman') {
+      return ['cisgender female', 'cis female', 'female', 'woman'];
+    }
+
+    if (g.includes('non') && g.includes('binary')) {
+      return ['non-binary', 'nonbinary', 'non binary'];
+    }
+
+    if (g.includes('trans')) {
+      // best-effort; different companies label this differently
+      return ['transgender', 'trans', genderValue];
+    }
+
+    // fallback: try the raw value first
+    return [genderValue];
+  }
+  function getReactSelectShellFromInput(inputEl) {
+    return inputEl.closest('.select-shell, [class*="select-shell"]')
+        || inputEl.closest('.select__container')
+        || inputEl.closest('.select')
+        || inputEl.parentElement;
+  }
+
+  function reactSelectHasAnySelectionFromShell(shell) {
+    if (!shell) return false;
+
+    // single select value
+    const single = shell.querySelector('.select__single-value');
+    if (single && (single.textContent || '').trim() && !/select/i.test(single.textContent)) return true;
+
+    // multi-select chips
+    const chips = shell.querySelectorAll('.select__multi-value__label, .select__multi-value');
+    for (const c of chips) {
+      const t = (c.textContent || '').trim();
+      if (t && !/select/i.test(t)) return true;
+    }
+
+    return false;
+  }
+
+  function reactSelectLooksMulti(shell) {
+    // react-select commonly adds this class for multi
+    if (shell?.querySelector('.select__value-container--is-multi')) return true;
+    // if chips exist, it's definitely multi
+    if (shell?.querySelector('.select__multi-value')) return true;
+    return false;
+  }
+
+  function raceCandidates(raceValue) {
+    const v = (raceValue || '').toLowerCase().trim();
+    if (!v) return [];
+
+    // If user chose an Asian subgroup, allow fallback to generic "Asian"
+    if (v === 'east asian' || v === 'south asian' || v === 'southeast asian') {
+      return [raceValue, 'asian'];
+    }
+
+    // Otherwise just try exact (plus common synonyms if you want later)
+    return [raceValue];
+  }
+
+  async function openReactSelect(inputEl) {
+    inputEl.focus();
+    dispatchMouseLikeClick(inputEl);
+    await sleep(40);
+  }
+
+  async function selectReactSelectValue(inputEl, candidates) {
+    if (!isReactSelectComboboxInput(inputEl)) return false;
+    if (!candidates?.some(Boolean)) return false;
+
+    await openReactSelect(inputEl);
+
+    for (const cand of candidates.filter(Boolean)) {
+      setNativeInputValue(inputEl, '');
+      await sleep(10);
+      setNativeInputValue(inputEl, cand);
+      await sleep(90);
+
+      const options = getReactSelectOptions(inputEl);
+      if (!options.length) continue;
+
+      const { best, bestScore } = findBestOption(options, cand);
+      if (!best || bestScore < 80) continue;
+
+      best.scrollIntoView({ block: 'nearest' });
+      dispatchMouseLikeClick(best);
+      await sleep(80);
+
+      if (!getReactSelectListbox(inputEl)) return true;
+      if (inputEl.getAttribute('aria-expanded') === 'false') return true;
+    }
+
+    return false;
+  }
+
   // Find field by label text
   function findFieldByLabel(labelTexts) {
     const labels = document.querySelectorAll('label, .field-label, [class*="label"]');
@@ -986,6 +1294,66 @@
     return null;
   }
 
+  const US_STATE_CODE_BY_NAME = {
+    'alabama':'AL','alaska':'AK','arizona':'AZ','arkansas':'AR','california':'CA','colorado':'CO',
+    'connecticut':'CT','delaware':'DE','district of columbia':'DC','florida':'FL','georgia':'GA','hawaii':'HI',
+    'idaho':'ID','illinois':'IL','indiana':'IN','iowa':'IA','kansas':'KS','kentucky':'KY','louisiana':'LA','maine':'ME',
+    'maryland':'MD','massachusetts':'MA','michigan':'MI','minnesota':'MN','mississippi':'MS','missouri':'MO','montana':'MT',
+    'nebraska':'NE','nevada':'NV','new hampshire':'NH','new jersey':'NJ','new mexico':'NM','new york':'NY',
+    'north carolina':'NC','north dakota':'ND','ohio':'OH','oklahoma':'OK','oregon':'OR','pennsylvania':'PA','rhode island':'RI',
+    'south carolina':'SC','south dakota':'SD','tennessee':'TN','texas':'TX','utah':'UT','vermont':'VT','virginia':'VA',
+    'washington':'WA','west virginia':'WV','wisconsin':'WI','wyoming':'WY'
+  };
+
+  const CA_PROVINCE_CODE_BY_NAME = {
+    'alberta':'AB','british columbia':'BC','manitoba':'MB','new brunswick':'NB','newfoundland and labrador':'NL',
+    'northwest territories':'NT','nova scotia':'NS','nunavut':'NU','ontario':'ON','prince edward island':'PE','quebec':'QC',
+    'saskatchewan':'SK','yukon':'YT'
+  };
+
+  function deriveStateProvinceCode(country, nameOrCode) {
+    if (!nameOrCode) return '';
+    const raw = String(nameOrCode).trim();
+    if (/^[A-Za-z]{2}$/.test(raw)) return raw.toUpperCase();
+    const key = normText(raw);
+    if (country === 'Canada') return CA_PROVINCE_CODE_BY_NAME[key] || '';
+    return US_STATE_CODE_BY_NAME[key] || '';
+  }
+
+  function looksLikeStateProvinceQuestion(labelText) {
+    const t = normText(labelText);
+    const hasRegion = t.includes('state') || t.includes('province') || t.includes('territor');
+    const hasResidence = t.includes('reside') || t.includes('live') || t.includes('located') || t.includes('location');
+    return hasRegion && (hasResidence || t.includes('canadian') || t.includes('u s'));
+  }
+
+  async function fillStateProvinceQuestion(userData) {
+    const country = userData?.country || 'US';
+    const desiredName = userData?.state || userData?.state_province || userData?.stateProvinceName;
+    if (!desiredName) return false;
+
+    const desiredCode = deriveStateProvinceCode(country, desiredName);
+
+    // 1) Greenhouse react-select combobox inputs
+    const inputs = Array.from(document.querySelectorAll('input.select__input[role="combobox"]'));
+    for (const input of inputs) {
+      const labelId = input.getAttribute('aria-labelledby');
+      const labelEl = labelId ? document.getElementById(labelId) : null;
+      const labelText = labelEl?.textContent || '';
+      if (!looksLikeStateProvinceQuestion(labelText)) continue;
+
+      // 如果已经选过，Greenhouse 会显示 .select__single-value
+      const hasSelectedValue = Boolean(input.closest('.select__value-container')?.querySelector('.select__single-value'));
+      if (hasSelectedValue) return false;
+
+      const ok = await selectReactSelectValue(input, [desiredName, desiredCode]);
+      if (ok) return true;
+    }
+
+    return false;
+  }
+
+
   // ==================== Main Fill Functions ====================
 
   function fillField(fieldName, value, mappings) {
@@ -1010,7 +1378,7 @@
         // Invalid selector, skip
       }
     }
-    
+        
     // Try label-based detection
     const labelTexts = LABEL_MAPPINGS[fieldName];
     if (labelTexts) {
@@ -1035,29 +1403,83 @@
     // EEO fields config: name, label keywords, value
     // EEO fields have fixed options, so we DON'T type to search - just open and select
     const eeoFieldsConfig = [
-      { name: 'gender', keywords: ['gender'], value: userData.gender },
-      { name: 'pronouns', keywords: ['pronoun'], value: userData.pronouns },
+      { name: 'gender', keywords: ['gender'], exclude: ['gender identity', 'identify your gender'], candidates: genderCandidates(userData.gender) },
+      { name: 'gender_identity', keywords: ['gender identity', 'identify your gender'], candidates: genderCandidates(userData.gender) },
       { name: 'hispanic_latino', keywords: ['hispanic', 'latino'], value: userData.hispanic_latino },
       { name: 'veteran_status', keywords: ['veteran'], value: userData.veteran_status },
       { name: 'disability_status', keywords: ['disability'], value: userData.disability_status }
     ];
     
     for (const field of eeoFieldsConfig) {
-      if (!field.value || field.value === 'Decline to Self Identify') {
-        log(` Skipping ${field.name} (no value or decline)`);
-        continue;
+      const valuesToTry = field.candidates?.length ? field.candidates : [field.value];
+      if (!valuesToTry.some(Boolean)) continue;
+
+      for (const v of valuesToTry.filter(Boolean)) {
+        // IMPORTANT: pass exclude phrases down (next patch)
+        const ok = await fillReactSelectByLabel(field.keywords, v, {
+          typeToSearch: false,
+          labelExcludes: field.exclude || []
+        });
+        if (ok) { results.push(field.name); break; }
       }
-      
-      log(` Filling EEO: ${field.name} = ${field.value}`);
-      
-      // typeToSearch: false - don't type, just open dropdown and select best match
-      if (await fillReactSelectByLabel(field.keywords, field.value, { typeToSearch: false })) {
-        results.push(field.name);
-        await new Promise(r => setTimeout(r, 400)); // Delay between fields
-      }
+
+      await new Promise(r => setTimeout(r, 300));
     }
     
     return results;
+  }
+
+  async function fillSimpleGenderSelect(userData) {
+    const gender = userData?.gender;
+    if (!gender) return false;
+
+    const input = document.getElementById('gender');
+    if (!input) return false;
+
+    // Don’t overwrite if already selected
+    const hasSelected = Boolean(
+      input.closest('.select__value-container')?.querySelector('.select__single-value')
+    );
+    if (hasSelected) return false;
+
+    return await selectReactSelectValue(input, genderCandidates([gender]));
+  }
+
+    async function fillRaceEthnicityAll(userData) {
+    const raceVal = (userData.race_ethnicity || '').trim();
+    if (!raceVal) return false;
+    if (raceVal.toLowerCase() === 'prefer not to say') return false;
+
+    const candidates = raceCandidates(raceVal); // e.g. ["East Asian", "Asian"]
+    const keywords = ['race', 'ethnicity', 'race/ethnicity', 'identify your race'];
+
+    let filledCount = 0;
+
+    // React-select comboboxes
+    const comboInputs = Array.from(document.querySelectorAll('input.select__input[role="combobox"], input[role="combobox"]'));
+
+    for (const input of comboInputs) {
+      const lab = labelTextForInput(input);
+      if (!matchesAnyKeyword(lab, keywords)) continue;
+
+      const shell = getReactSelectShellFromInput(input);
+
+      // Rule: never touch a MULTI-select race field again once it has any selection
+      if (reactSelectLooksMulti(shell) && reactSelectHasAnySelectionFromShell(shell)) {
+        continue;
+      }
+
+      // also skip any already-filled single-select (safe)
+      if (!reactSelectLooksMulti(shell) && reactSelectHasAnySelectionFromShell(shell)) {
+        continue;
+      }
+
+      // Per-widget fallback: try East Asian, then Asian (within this SAME widget)
+      const ok = await selectReactSelectValue(input, candidates);
+      if (ok) filledCount++;
+    }
+
+    return filledCount > 0;
   }
 
   async function fillEducationFields(userData) {
@@ -1124,302 +1546,30 @@
     return results;
   }
 
-  async function fillStateProvince(userData) {
-    if (!userData.state) return false;
-    
-    log(` Filling State/Province: ${userData.state}`);
-    
-    // Keywords to identify state/province questions (must be specific)
-    const stateKeywords = [
-      'u.s. state or canadian province',
-      'state or canadian province', 
-      'state or province',
-      'which u.s. state',
-      'which state',
-      'which province',
-      'what state',
-      'state do you reside',
-      'province do you reside'
-    ];
-    
-    // First, close any open dropdowns
-    document.body.click();
-    await new Promise(r => setTimeout(r, 200));
-    
-    // Strategy: Find all field containers first, then check which one has state question
-    // This prevents accidentally finding the wrong select-shell
-    const fieldContainers = document.querySelectorAll('.field, [class*="field-wrapper"], [class*="form-field"]');
-    
-    for (const fieldContainer of fieldContainers) {
-      const fieldText = fieldContainer.textContent?.toLowerCase() || '';
-      
-      // Check if this field contains state/province keywords
-      const isStateField = stateKeywords.some(kw => fieldText.includes(kw));
-      if (!isStateField) continue;
-      
-      // Make sure it's not an authorization question that happens to contain "state"
-      if (fieldText.includes('authorized') || fieldText.includes('sponsor') || 
-          fieldText.includes('visa') || fieldText.includes('legally')) {
-        continue;
-      }
-      
-      log(` Found state/province field container`);
-      
-      // Find select-shell ONLY within this specific field container
-      const selectShell = fieldContainer.querySelector('.select-shell, [class*="select-shell"]');
-      
-      if (!selectShell) {
-        log(' No select-shell in this field container');
-        continue;
-      }
-      
-      // Verify this is a state dropdown by checking if options contain state names
-      // First, check if already has a value
-      const existingValue = selectShell.querySelector('.select__single-value');
-      if (existingValue && existingValue.textContent && !existingValue.textContent.includes('Select')) {
-        log(' Already has value:', existingValue.textContent);
-        return false;
-      }
-      
-      // Get input and control elements
-      const input = selectShell.querySelector('input.select__input, input[role="combobox"]');
-      const control = selectShell.querySelector('.select__control') || selectShell;
-      
-      // Focus first
-      if (input) input.focus();
-      await new Promise(r => setTimeout(r, 100));
-      
-      // Open dropdown with pointer events
-      const rect = control.getBoundingClientRect();
-      const x = rect.left + rect.width / 2;
-      const y = rect.top + rect.height / 2;
-      
-      ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(type => {
-        const e = new PointerEvent(type, {
-          bubbles: true,
-          cancelable: true,
-          view: window,
-          clientX: x,
-          clientY: y,
-          pointerId: 1,
-          pointerType: 'mouse'
-        });
-        control.dispatchEvent(e);
-      });
-      
-      await new Promise(r => setTimeout(r, 300));
-      
-      // Type to search (state list is long)
-      if (input) {
-        input.focus();
-        
-        // Clear existing value
-        input.value = '';
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        await new Promise(r => setTimeout(r, 100));
-        
-        // Type state name character by character
-        for (const char of userData.state) {
-          input.value += char;
-          input.dispatchEvent(new Event('input', { bubbles: true }));
-          await new Promise(r => setTimeout(r, 50));
-        }
-        
-        await new Promise(r => setTimeout(r, 500));
-      }
-      
-      // Find and click matching option
-      let menu = selectShell.querySelector('.select__menu');
-      if (!menu) {
-        const menuId = input?.getAttribute('aria-controls');
-        if (menuId) {
-          menu = document.getElementById(menuId);
-        }
-      }
-      if (!menu) {
-        menu = document.querySelector('.select__menu');
-      }
-      
-      if (menu) {
-        const options = menu.querySelectorAll('.select__option');
-        const stateLower = userData.state.toLowerCase();
-        
-        for (const opt of options) {
-          const optText = opt.textContent?.toLowerCase() || '';
-          if (optText === stateLower || optText.includes(stateLower)) {
-            // Click using pointer events
-            const optRect = opt.getBoundingClientRect();
-            ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(type => {
-              const e = new PointerEvent(type, {
-                bubbles: true,
-                cancelable: true,
-                view: window,
-                clientX: optRect.left + optRect.width / 2,
-                clientY: optRect.top + optRect.height / 2,
-                pointerId: 1,
-                pointerType: 'mouse'
-              });
-              opt.dispatchEvent(e);
-            });
-            
-            log(` ✓ State/Province filled: ${userData.state}`);
-            await new Promise(r => setTimeout(r, 200));
-            return true;
-          }
-        }
-      }
-      
-      log(' Could not find matching state option');
-    }
-    
-    return false;
-  }
-
-  async function fillAuthorizedField() {
-    log(' Looking for work authorization fields...');
-    
-    // Keywords that indicate work authorization questions (NOT sponsorship)
-    const authKeywords = [
-      'legally authorized',
-      'authorized to work',
-      'legally eligible',
-      'eligible to work',
-      'legally permitted',
-      'permitted to work',
-      'work authorization',
-      'right to work',
-      'lawfully authorized',
-      'legal right to work',
-      'employment eligibility',
-      'legally able to work'
-    ];
-    
-    // Keywords that indicate it's a sponsorship question (should be handled separately)
-    const sponsorshipKeywords = ['sponsor', 'visa', 'h1b', 'h-1b', 'immigration'];
-    
-    // Strategy 1: Try standard select elements first
+  function fillAuthorizedField() {
+    // Strategy 1: native <select>
     for (const selector of AUTHORIZED_SELECTORS) {
       const elements = document.querySelectorAll(selector);
       for (const element of elements) {
-        if (element) {
-          // Find the label/question text for this field
-          const container = element.closest('.field, .form-group, .question, [class*="field"]') || element.parentElement;
-          const labelText = container ? container.textContent.toLowerCase() : '';
-          
-          // Skip if this is actually a sponsorship question
-          if (sponsorshipKeywords.some(kw => labelText.includes(kw))) {
-            log(' Skipping - this is a sponsorship question');
-            continue;
-          }
-          
-          // Check if already filled
-          if (!isFieldEmpty(element)) {
-            log(' Authorized field already filled, skipping');
-            continue;
-          }
-          
-          const options = Array.from(element.options);
-          const yesOption = options.find(opt => 
-            opt.text.toLowerCase().includes('yes') || opt.value.toLowerCase() === 'yes'
-          );
-          
-          if (yesOption) {
-            element.value = yesOption.value;
-            element.dispatchEvent(new Event('change', { bubbles: true }));
-            log(' Authorized (standard select): Yes');
-            return true;
-          }
+        if (!isFieldEmpty(element)) return false;
+
+        const options = Array.from(element.options);
+        const yesOption = options.find(opt =>
+          (opt.text || '').toLowerCase().includes('yes') || (opt.value || '').toLowerCase() === 'yes'
+        );
+
+        if (yesOption) {
+          element.value = yesOption.value;
+          element.dispatchEvent(new Event('change', { bubbles: true }));
+          log(' Authorized: Yes (native select)');
+          return true;
         }
       }
     }
-    
-    // Strategy 2: Find ALL labels that match authorization keywords
-    const allLabels = document.querySelectorAll('label, .field-label, [class*="label"], [class*="question"]');
-    
-    for (const label of allLabels) {
-      const labelText = label.textContent.toLowerCase();
-      
-      // Check if this label mentions authorization (but NOT sponsorship)
-      const isAuthQuestion = authKeywords.some(kw => labelText.includes(kw));
-      const isSponsorshipQuestion = sponsorshipKeywords.some(kw => labelText.includes(kw));
-      
-      if (isAuthQuestion && !isSponsorshipQuestion) {
-        log(` Found authorization question: "${label.textContent.substring(0, 60)}..."`);
-        
-        // Look for React Select in the same container
-        const container = label.closest('.field, .form-group, .question, [class*="field"]') || label.parentElement;
-        if (!container) continue;
-        
-        const selectShell = container.querySelector('[class*="select__"], [class*="-control"], [class*="Select"]');
-        
-        if (selectShell) {
-          // Use pointer events to open dropdown
-          const control = selectShell.querySelector('[class*="-control"]') || selectShell;
-          const rect = control.getBoundingClientRect();
-          const x = rect.left + rect.width / 2;
-          const y = rect.top + rect.height / 2;
-          
-          // Close any existing dropdowns first
-          document.body.click();
-          await new Promise(r => setTimeout(r, 200));
-          
-          // Open dropdown with pointer events
-          ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(type => {
-            const event = new PointerEvent(type, {
-              bubbles: true,
-              cancelable: true,
-              view: window,
-              clientX: x,
-              clientY: y,
-              pointerId: 1,
-              pointerType: 'mouse'
-            });
-            control.dispatchEvent(event);
-          });
-          
-          await new Promise(r => setTimeout(r, 300));
-          
-          // Find and click "Yes" option
-          const menu = document.querySelector('[class*="select__menu"], [class*="-menu"]');
-          if (menu) {
-            const options = menu.querySelectorAll('[class*="option"]');
-            for (const opt of options) {
-              const optText = opt.textContent.toLowerCase();
-              if (optText.includes('yes')) {
-                opt.click();
-                log(' Authorized (React Select): Yes');
-                await new Promise(r => setTimeout(r, 200));
-                return true;
-              }
-            }
-          }
-        }
-        
-        // Also check for standard select in container
-        const standardSelect = container.querySelector('select');
-        if (standardSelect && isFieldEmpty(standardSelect)) {
-          const options = Array.from(standardSelect.options);
-          const yesOption = options.find(opt => 
-            opt.text.toLowerCase().includes('yes') || opt.value.toLowerCase() === 'yes'
-          );
-          if (yesOption) {
-            standardSelect.value = yesOption.value;
-            standardSelect.dispatchEvent(new Event('change', { bubbles: true }));
-            log(' Authorized (found via label): Yes');
-            return true;
-          }
-        }
-      }
-    }
-    
-    // Strategy 3: Fallback - try React Select with keywords
-    for (const keyword of authKeywords.slice(0, 5)) { // Try first 5 keywords
-      if (await fillReactSelectByLabel([keyword], 'Yes', { typeToSearch: false })) {
-        log(` Authorized (React Select via "${keyword}"): Yes`);
-        return true;
-      }
-    }
-    
+
+    // Strategy 2: Greenhouse react-select (combobox)
+    // Note: this is async, but we can “fire and forget” if you keep function sync,
+    // OR (better) make the caller await it. I recommend the await approach below.
     return false;
   }
 
@@ -1658,6 +1808,11 @@
     };
     
     log(' Starting autofill (will not overwrite existing values)');
+
+    console.log("[AUTOFILL] performAutofill start", {
+      url: location.href,
+      userKeys: Object.keys(userData || {}),
+    });
     
     // Prepare data
     const dataToFill = { ...userData };
@@ -1666,11 +1821,10 @@
     }
     
     // Fill standard fields (excluding phone - handled separately)
-    // Note: Greenhouse typically doesn't have separate city/state/zip fields
-    // They usually handle location differently, so we skip these to avoid wrong matches
     const standardFields = [
       'first_name', 'last_name', 'preferred_first_name', 'email',
-      'current_company', 'linkedin', 'github', 'website'
+      'current_company',
+      'linkedin', 'github', 'website'
     ];
     
     for (const fieldName of standardFields) {
@@ -1695,25 +1849,53 @@
     const eduResults = await fillEducationFields(dataToFill);
     results.filled.push(...eduResults);
     
-    // Fill state/province field (React Select)
-    if (await fillStateProvince(dataToFill)) {
-      results.filled.push('state');
-    }
-    
     // Fill EEO fields
     const eeoResults = await fillEEOFields(dataToFill);
     results.filled.push(...eeoResults);
     
     // Work authorization - always Yes
-    if (await fillAuthorizedField()) {
+    if (fillAuthorizedField()) {
       results.filled.push('authorized');
+    } else {
+      const ok = await fillReactSelectByLabel(
+        ['legally authorized to work', 'authorized to work', 'eligible to work'],
+        'Yes',
+        { typeToSearch: false }
+      );
+      if (ok) results.filled.push('authorized');
     }
-    
+
     // Sponsorship - based on user's status
     const needsSponsorship = userData.needs_sponsorship !== false;
     if (await fillSponsorshipField(needsSponsorship)) {
       results.filled.push('sponsorship');
     }
+
+    if (await fillStateProvinceQuestion(userData)) {
+      results.filled.push('state_province');
+    }
+
+    if (await fillSimpleGenderSelect(userData)) {
+      results.filled.push('gender');
+    }
+
+    // Pronouns (often a custom question at the top, react-select)
+    if (userData.pronouns) {
+      const ok = await fillReactSelectByLabel(['pronouns'], userData.pronouns, { typeToSearch: false });
+      if (ok) results.filled.push('pronouns');
+    }
+
+    // LGBTQ+
+    if (userData.lgbtq) {
+      const ok = await fillByLabelKeywords(
+        ['lgbtq', 'lgbtq+', 'sexual orientation', 'identify as lgbtq', 'lgbt'],
+        userData.lgbtq
+      );
+      if (ok) results.filled.push('lgbtq');
+    }
+
+    // Race / Ethnicity
+    await fillRaceEthnicityAll(userData);
     
     // Upload documents (won't re-upload if already uploaded)
     if (resumeData) {
@@ -1744,6 +1926,9 @@
       case 'AUTOFILL':
         performAutofill(message.userData, message.resumeData, message.coverLetterData).then(results => {
           sendResponse(results);
+        }).catch(err => {
+          console.error("[JobAutofill] performAutofill crashed:", err);
+          sendResponse({ filled: [], error: String(err?.message || err) });
         });
         return true;
         

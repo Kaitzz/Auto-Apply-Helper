@@ -28,14 +28,7 @@ function isJobApplicationPage(url) {
     const isApplicationPage = /\/jobs\/\d+/.test(urlLower);
     return { isJobPage: isApplicationPage, type: isApplicationPage ? 'greenhouse' : null };
   }
-  
-  // Lever: check for job ID in path
-  if (urlLower.includes('lever.co')) {
-    const path = new URL(url).pathname;
-    const isApplicationPage = path.split('/').length >= 3 && path.split('/')[2].length > 10;
-    return { isJobPage: isApplicationPage, type: isApplicationPage ? 'lever' : null };
-  }
-  
+
   // Workday: check for job/apply page
   if (urlLower.includes('workday.com')) {
     const isApplicationPage = urlLower.includes('/job/') || urlLower.includes('/apply');
@@ -118,28 +111,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
       return true;
       
-    case 'TRIGGER_AUTOFILL':
+    case "TRIGGER_AUTOFILL": {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs[0]) {
-          chrome.tabs.sendMessage(tabs[0].id, { 
-            type: 'AUTOFILL',
-            userData: message.userData,
-            resumeData: message.resumeData,
-            coverLetterData: message.coverLetterData
-          }, (response) => {
-            if (chrome.runtime.lastError) {
-              log('Could not send message to content script:', chrome.runtime.lastError);
-              sendResponse({ error: 'Content script not available. Try refreshing the page.' });
-            } else {
+        const tab = tabs && tabs[0];
+        if (!tab?.id) {
+          sendResponse({ filled: null, error: "No active tab" });
+          return;
+        }
+
+        chrome.storage.local.get(["userData", "resumeData", "coverLetterData"], (result) => {
+          const userData = message.userData ?? result.userData ?? {};
+          const resumeData = message.resumeData ?? result.resumeData ?? null;
+          const coverLetterData = message.coverLetterData ?? result.coverLetterData ?? null;
+
+          // IMPORTANT: your content script expects type: "AUTOFILL"
+          chrome.tabs.sendMessage(
+            tab.id,
+            { type: "AUTOFILL", userData, resumeData, coverLetterData },
+            (response) => {
+              if (chrome.runtime.lastError) {
+                sendResponse({ filled: null, error: chrome.runtime.lastError.message });
+                return;
+              }
               sendResponse(response);
             }
-          });
-        } else {
-          sendResponse({ error: 'No active tab found' });
-        }
+          );
+        });
       });
-      return true;
-      
+
+      return true; // async response
+    }
+
     case 'DETECT_FORM':
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (tabs[0]) {
