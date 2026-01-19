@@ -111,7 +111,7 @@ const CA_PROVINCES = [
   { value: 'Yukon', label: 'Yukon' }
 ]
 
-// Generate year options (current year back to 2000)
+// Generate year options
 const currentYear = new Date().getFullYear()
 const YEAR_OPTIONS = [
   { value: '', label: 'Select...' },
@@ -589,7 +589,7 @@ function App() {
               placeholder="Full name: University of Illinois - Urbana-Champaign"
             />
             <p className="text-xs text-gray-500 -mt-2 mb-2">
-              💡 Use full name with " - " for multi-campus schools
+              Use full name with " - " for multi-campus schools
             </p>
             <SelectField
               label="Degree *"

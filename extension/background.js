@@ -51,7 +51,7 @@ async function updateBadgeForTab(tabId, url) {
   
   if (isJobPage) {
     await chrome.action.setBadgeText({ tabId, text: '!' });
-    await chrome.action.setBadgeBackgroundColor({ tabId, color: '#22c55e' });
+    await chrome.action.setBadgeBackgroundColor({ tabId, color: '#34cd6c' });
     await chrome.action.setTitle({ 
       tabId, 
       title: 'Application page detected! Click to autofill.'
