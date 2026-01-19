@@ -389,7 +389,7 @@ function App() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-4">
-        <h1 className="text-lg font-semibold">Job Autofill</h1>
+        <h1 className="text-lg font-semibold">Auto-Apply Helper</h1>
         {formType && formType.detected && (
           <p className="text-blue-100 text-sm mt-1">
             Detected: {formType.type.charAt(0).toUpperCase() + formType.type.slice(1)} form
