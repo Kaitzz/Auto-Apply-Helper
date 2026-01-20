@@ -213,8 +213,6 @@ function App() {
     disability_status: 'Decline to Self Identify'
   })
   const [resumeData, setResumeData] = useState(null)
-  const [resumeData2, setResumeData2] = useState(null)
-  const [selectedResume, setSelectedResume] = useState(1)
   const [coverLetterData, setCoverLetterData] = useState(null)
   const [status, setStatus] = useState({ type: '', message: '' })
   const [formType, setFormType] = useState(null)
@@ -222,11 +220,9 @@ function App() {
 
   // Load saved data on mount
   useEffect(() => {
-    storage.get(['userData', 'resumeData', 'resumeData2', 'selectedResume', 'coverLetterData']).then((result) => {
+    storage.get(['userData', 'resumeData', 'coverLetterData']).then((result) => {
       if (result.userData) setFormData(prev => ({ ...prev, ...result.userData }))
       if (result.resumeData) setResumeData(result.resumeData)
-      if (result.resumeData2) setResumeData2(result.resumeData2)
-      if (result.selectedResume) setSelectedResume(result.selectedResume)
       if (result.coverLetterData) setCoverLetterData(result.coverLetterData)
     })
     
@@ -277,7 +273,7 @@ function App() {
     setTimeout(() => setStatus({ type: '', message: '' }), 2000)
   }
 
-  // Handle file upload (resume, resume2, or cover letter)
+  // Handle file upload (resume, cover letter)
   const handleFileUpload = (e, type) => {
     const file = e.target.files[0]
     if (!file) return
@@ -295,11 +291,7 @@ function App() {
       if (type === 'resume') {
         setResumeData(data)
         storage.set({ resumeData: data })
-        setStatus({ type: 'success', message: `Resume 1 "${file.name}" saved!` })
-      } else if (type === 'resume2') {
-        setResumeData2(data)
-        storage.set({ resumeData2: data })
-        setStatus({ type: 'success', message: `Resume 2 "${file.name}" saved!` })
+        setStatus({ type: 'success', message: `Resume "${file.name}" saved!` })
       } else {
         setCoverLetterData(data)
         storage.set({ coverLetterData: data })
@@ -310,22 +302,9 @@ function App() {
     reader.readAsDataURL(file)
   }
 
-  // Handle resume selection change
-  const handleResumeSelect = (resumeNum) => {
-    setSelectedResume(resumeNum)
-    storage.set({ selectedResume: resumeNum })
-  }
-
-  // Get the currently selected resume data
-  const getSelectedResumeData = () => {
-    return selectedResume === 2 ? resumeData2 : resumeData
-  }
-
   // Trigger autofill
   const handleAutofill = async () => {
     setStatus({ type: 'loading', message: 'Filling form...' })
-    
-    const activeResumeData = getSelectedResumeData()
     
     try {
       const result = await sendMessage({
@@ -335,13 +314,13 @@ function App() {
           phone_full: getFullPhoneNumber(),
           needs_sponsorship: needsSponsorship()
         },
-        resumeData: activeResumeData,
+        resumeData: resumeData,
         coverLetterData: coverLetterData
       })
       
       if (result && result.filled) {
         const filledCount = result.filled.length
-        const resumeMsg = result.resumeUploaded ? ` Resume ${selectedResume} uploaded!` : ''
+        const resumeMsg = result.resumeUploaded ? ` Resume uploaded!` : ''
         setStatus({ type: 'success', message: `Filled ${filledCount} fields!${resumeMsg}` })
       } else {
         setStatus({ type: 'error', message: 'Could not fill form. Make sure you are on an application page.' })
@@ -708,25 +687,9 @@ function App() {
 
         {activeTab === 'docs' && (
           <div className="space-y-4">
-            <p className="text-xs text-gray-500">
-              Upload up to 2 resumes and select which one to use for autofill.
-            </p>
             
-            {/* Resume 1 Upload */}
-            <div className={`border-2 rounded-lg p-3 ${selectedResume === 1 ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}>
-              <div className="flex items-center gap-2 mb-2">
-                <input
-                  type="radio"
-                  id="select-resume-1"
-                  name="resume-select"
-                  checked={selectedResume === 1}
-                  onChange={() => handleResumeSelect(1)}
-                  className="w-4 h-4 text-blue-600"
-                />
-                <label htmlFor="select-resume-1" className="text-sm font-medium text-gray-700 cursor-pointer">
-                  Resume 1 {selectedResume === 1 && <span className="text-blue-600">(Active)</span>}
-                </label>
-              </div>
+            {/* Resume Upload */}
+            <div className="border-2 rounded-lg p-3 border-blue-500 bg-blue-50">
               <div className="border-2 border-dashed border-gray-300 rounded-lg p-3 text-center bg-white">
                 <input
                   type="file"
@@ -737,7 +700,7 @@ function App() {
                 />
                 <label htmlFor="resume-upload" className="cursor-pointer flex flex-col items-center gap-1">
                   <Upload size={20} className="text-gray-400" />
-                  <span className="text-xs text-gray-600">Upload Resume 1</span>
+                  <span className="text-xs text-gray-600">Upload Resume</span>
                   <span className="text-xs text-gray-400">PDF, DOC, DOCX</span>
                 </label>
               </div>
@@ -747,49 +710,6 @@ function App() {
                   <span className="text-xs text-green-800 truncate flex-1">{resumeData.filename}</span>
                   <button
                     onClick={() => { setResumeData(null); storage.set({ resumeData: null }) }}
-                    className="text-green-600 hover:text-green-800 text-xs"
-                  >
-                    ✕
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Resume 2 Upload */}
-            <div className={`border-2 rounded-lg p-3 ${selectedResume === 2 ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}>
-              <div className="flex items-center gap-2 mb-2">
-                <input
-                  type="radio"
-                  id="select-resume-2"
-                  name="resume-select"
-                  checked={selectedResume === 2}
-                  onChange={() => handleResumeSelect(2)}
-                  className="w-4 h-4 text-blue-600"
-                />
-                <label htmlFor="select-resume-2" className="text-sm font-medium text-gray-700 cursor-pointer">
-                  Resume 2 {selectedResume === 2 && <span className="text-blue-600">(Active)</span>}
-                </label>
-              </div>
-              <div className="border-2 border-dashed border-gray-300 rounded-lg p-3 text-center bg-white">
-                <input
-                  type="file"
-                  id="resume-upload-2"
-                  accept=".pdf,.doc,.docx"
-                  onChange={(e) => handleFileUpload(e, 'resume2')}
-                  className="hidden"
-                />
-                <label htmlFor="resume-upload-2" className="cursor-pointer flex flex-col items-center gap-1">
-                  <Upload size={20} className="text-gray-400" />
-                  <span className="text-xs text-gray-600">Upload Resume 2</span>
-                  <span className="text-xs text-gray-400">PDF, DOC, DOCX</span>
-                </label>
-              </div>
-              {resumeData2 && (
-                <div className="mt-2 bg-green-50 border border-green-200 rounded-lg p-2 flex items-center gap-2">
-                  <FileText className="text-green-600" size={16} />
-                  <span className="text-xs text-green-800 truncate flex-1">{resumeData2.filename}</span>
-                  <button
-                    onClick={() => { setResumeData2(null); storage.set({ resumeData2: null }) }}
                     className="text-green-600 hover:text-green-800 text-xs"
                   >
                     ✕
