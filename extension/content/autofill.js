@@ -19,9 +19,7 @@
 
   // ==================== In-Page Notification ====================
   
-  /**
-   * Check if current page is an actual job application page (not a listing page)
-   */
+  // Check if current page is an actual job application page (not a listing page)
   function isApplicationPage() {
     const url = window.location.href;
     const path = window.location.pathname;
@@ -36,158 +34,157 @@
            document.querySelector('form[action*="apply"]') !== null;
   }
 
-  function showNotificationBanner() {
-    if (document.getElementById('job-autofill-notif')) return;
-    if (sessionStorage.getItem('job-autofill-dismissed')) return;
+  // ---------- Persistent “Supported” Banner (no auto-dismiss) ----------
+  let __jobAutofillBannerState = 'supported'; // supported | running | success | error
 
-    // Only show on actual application pages, not listing pages
-    if (!isApplicationPage()) return;
-    
-    const notif = document.createElement('div');
+  function bannerDismissKey() {
+    // dismiss per job page (so closing one job doesn't hide all)
+    return `job-autofill-banner-dismissed:${location.pathname}`;
+  }
+  function bannerDismissDuringRunKey() {
+    return `job-autofill-banner-dismissed-during-run:${location.pathname}`;
+  }
+
+  function showNotificationBanner({ force = false } = {}) {
+    const dismissed = sessionStorage.getItem(bannerDismissKey()) === '1';
+
+    // If dismissed and not forcing, keep hidden (but still create if missing)
+    let notif = document.getElementById('job-autofill-notif');
+    if (notif) {
+      notif.style.display = (force || !dismissed) ? 'block' : 'none';
+      return notif;
+    }
+
+    // Create banner
+    notif = document.createElement('div');
     notif.id = 'job-autofill-notif';
+    notif.style.position = 'fixed';
+    // ✅ top-right (instead of bottom-right)
+    notif.style.top = '16px';
+    notif.style.right = '16px';
+    notif.style.bottom = 'auto';
+    notif.style.left = 'auto';
+
+    notif.style.padding = '12px 14px';
+    notif.style.borderRadius = '12px';
+    notif.style.border = '1px solid #3b82f6';
+    notif.style.backgroundColor = '#eff6ff';
+    notif.style.color = '#1e3a8a';
+    notif.style.fontSize = '13px';
+    notif.style.lineHeight = '1.35';
+    notif.style.zIndex = '999999';
+    notif.style.boxShadow = '0 10px 30px rgba(0,0,0,0.14)';
+    notif.style.maxWidth = '340px';
+    // modern system font stack
+    notif.style.fontFamily =
+      'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif';
+    notif.style.webkitFontSmoothing = 'antialiased';
+    notif.style.mozOsxFontSmoothing = 'grayscale';
+
+    // Two-part layout: status + detail, plus actions
     notif.innerHTML = `
-      <style>
-        @keyframes popIn {
-          0% { transform: scale(0.8) translateY(-10px); opacity: 0; }
-          100% { transform: scale(1) translateY(0); opacity: 1; }
-        }
-        @keyframes pulse {
-          0%, 100% { box-shadow: 0 4px 20px rgba(37, 99, 235, 0.3); }
-          50% { box-shadow: 0 4px 25px rgba(37, 99, 235, 0.5); }
-        }
-        #job-autofill-notif-card {
-          animation: popIn 0.3s ease-out, pulse 2s ease-in-out infinite;
-        }
-        #job-autofill-notif-card:hover {
-          transform: translateY(-2px);
-        }
-        #job-autofill-btn:hover {
-          background: #1d4ed8 !important;
-        }
-        #job-autofill-close:hover {
-          background: rgba(0,0,0,0.1) !important;
-        }
-      </style>
-      
-      <div id="job-autofill-notif-card" style="
-        position: fixed;
-        top: 16px;
-        right: 16px;
-        z-index: 2147483647;
-        background: white;
-        border-radius: 12px;
-        padding: 16px;
-        width: 280px;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        box-shadow: 0 4px 20px rgba(37, 99, 235, 0.3);
-        border: 1px solid rgba(37, 99, 235, 0.2);
-        transition: transform 0.2s ease;
-      ">
-        <div style="
-          position: absolute;
-          top: -8px;
-          right: 24px;
-          width: 16px;
-          height: 16px;
-          background: white;
-          border-left: 1px solid rgba(37, 99, 235, 0.2);
-          border-top: 1px solid rgba(37, 99, 235, 0.2);
-          transform: rotate(45deg);
-        "></div>
-        
-        <button id="job-autofill-close" style="
-          position: absolute;
-          top: 8px;
-          right: 8px;
-          background: transparent;
-          border: none;
-          cursor: pointer;
-          padding: 4px;
-          border-radius: 4px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: #9ca3af;
-          transition: all 0.15s ease;
-        " title="Dismiss">
-          <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
-          </svg>
-        </button>
-        
-        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
-          <div style="
-            width: 36px;
-            height: 36px;
-            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 18px;
-          ">
-            🌿
+      <div style="display:flex; align-items:flex-start; gap:12px;">
+        <div style="flex:1; min-width:0;">
+          <div id="job-autofill-status" style="font-weight:700; margin-bottom:4px;">
+            Auto-Apply supported!
           </div>
-          <div>
-            <div style="font-weight: 600; font-size: 14px; color: #1f2937;">
-              Job Autofill
-            </div>
-            <div style="font-size: 11px; color: #6b7280;">
-              Chrome Extension
-            </div>
+          <div id="job-autofill-detail" style="font-size:12px; opacity:0.95; line-height:1.35;">
+            Ready. Open side panel to update info.
           </div>
         </div>
-        
-        <div style="font-size: 13px; color: #374151; margin-bottom: 14px; line-height: 1.4;">
-          This page is supported! Autofilling for you now...
+
+        <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+          <button id="job-autofill-open-panel"
+            style="padding:5px 8px; font-size:12px; border:none; border-radius:8px; cursor:pointer;
+                  background:#2563eb; color:white;">
+            Update
+          </button>
+          <button id="job-autofill-close"
+            style="padding:0 6px; font-size:16px; line-height:18px; border:none; border-radius:8px;
+                  cursor:pointer; background:transparent; color:inherit;">
+            ×
+          </button>
         </div>
-        
-        <button id="job-autofill-btn" style="
-          width: 100%;
-          background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-          color: white;
-          border: none;
-          padding: 10px 16px;
-          border-radius: 8px;
-          font-weight: 600;
-          font-size: 13px;
-          cursor: pointer;
-          transition: all 0.15s ease;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-        ">
-          <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
-          </svg>
-          Open Panel to Update Info
-        </button>
       </div>
     `;
-    
+
     document.body.appendChild(notif);
-    
-    document.getElementById('job-autofill-btn').addEventListener('click', () => {
-      chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' });
-      notif.remove();
+
+    // Open side panel
+    const openBtn = notif.querySelector('#job-autofill-open-panel');
+    openBtn?.addEventListener('click', () => {
+      try {
+        chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' });
+      } catch (_) {}
     });
-    
-    document.getElementById('job-autofill-close').addEventListener('click', () => {
-      notif.remove();
-      sessionStorage.setItem('job-autofill-dismissed', 'true');
-    });
-    
-    setTimeout(() => {
-      if (document.getElementById('job-autofill-notif')) {
-        notif.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
-        notif.style.opacity = '0';
-        notif.style.transform = 'translateY(-10px)';
-        setTimeout(() => notif.remove(), 300);
+
+    // Close (persist until tab close via sessionStorage)
+    const closeBtn = notif.querySelector('#job-autofill-close');
+    closeBtn?.addEventListener('click', () => {
+      // If user closes WHILE RUNNING, remember it so we can re-show success once
+      if (__jobAutofillBannerState === 'running') {
+        sessionStorage.setItem(bannerDismissDuringRunKey(), '1');
       }
-    }, 10000);
-    
-    log(' Notification shown');
+      sessionStorage.setItem(bannerDismissKey(), '1');
+      notif.style.display = 'none';
+    });
+
+    // Respect dismiss state on first render
+    notif.style.display = (force || !dismissed) ? 'block' : 'none';
+    return notif;
+  }
+
+  function updateNotificationBanner(state, payload = {}) {
+    if (state) __jobAutofillBannerState = state;
+
+    // If user dismissed DURING RUN, we force-show SUCCESS once
+    const dismissedDuringRun = sessionStorage.getItem(bannerDismissDuringRunKey()) === '1';
+    const force = (__jobAutofillBannerState === 'success' && dismissedDuringRun);
+
+    if (force) {
+      // clear dismiss so success can show
+      sessionStorage.removeItem(bannerDismissKey());
+      sessionStorage.removeItem(bannerDismissDuringRunKey());
+    }
+
+    const notif = showNotificationBanner({ force });
+    if (!notif) return;
+
+    const statusEl = notif.querySelector('#job-autofill-status');
+    const detailEl = notif.querySelector('#job-autofill-detail');
+
+    const filledCount = payload.filledCount ?? 0;
+    const resumeUploaded = !!payload.resumeUploaded;
+    const coverLetterUploaded = !!payload.coverLetterUploaded;
+
+    // Theme by state
+    const theme = {
+      supported: { border: '#3b82f6', bg: '#eff6ff', fg: '#1e3a8a' },
+      running:   { border: '#3b82f6', bg: '#eff6ff', fg: '#1e3a8a' },
+      success:   { border: '#22c55e', bg: '#f0fdf4', fg: '#14532d' },
+      error:     { border: '#ef4444', bg: '#fef2f2', fg: '#7f1d1d' }
+    }[__jobAutofillBannerState] || { border: '#3b82f6', bg: '#eff6ff', fg: '#1e3a8a' };
+
+    notif.style.borderColor = theme.border;
+    notif.style.backgroundColor = theme.bg;
+    notif.style.color = theme.fg;
+
+    if (__jobAutofillBannerState === 'running') {
+      statusEl.textContent = 'Auto-Apply supported!';
+      detailEl.textContent = 'Filling for you now…';
+    } else if (__jobAutofillBannerState === 'success') {
+      statusEl.textContent = 'Filling succeeded!';
+      const parts = [`Autofilled ${filledCount} fields`];
+      if (resumeUploaded) parts.push('Resume uploaded');
+      if (coverLetterUploaded) parts.push('Cover letter uploaded');
+      detailEl.textContent = parts.join(' • ');
+    } else if (__jobAutofillBannerState === 'error') {
+      statusEl.textContent = 'Auto-Apply supported!';
+      detailEl.textContent = payload.message || 'Could not autofill. Open side panel to try again.';
+    } else {
+      statusEl.textContent = 'Auto-Apply supported!';
+      detailEl.textContent = 'Ready. Open side panel to update info.';
+    }
   }
 
   // ==================== Field Mappings ====================
@@ -355,6 +352,13 @@
   function isGreenhousePage() {
     return window.location.hostname.includes('greenhouse.io') ||
            document.querySelector('#application_form') !== null;
+  }
+
+  function isGreenhouseApplicationPage() {
+    // strongest signal: application form exists
+    return location.hostname.includes('greenhouse.io') && !!document.querySelector('#application_form');
+    // OR if you already have isApplicationPage() that correctly detects /jobs/\d+,
+    // you can just return isGreenhouseHost() && isApplicationPage();
   }
 
   function detectFormType() {
@@ -2032,12 +2036,6 @@
       results.coverLetterUploaded = await uploadCoverLetter(coverLetterData);
     }
     
-    // Remove notification
-    const notif = document.getElementById('job-autofill-notif');
-    if (notif && results.filled.length > 0) {
-      notif.remove();
-    }
-    
     log(' Results:', results);
     return results;
   }
@@ -2045,7 +2043,16 @@
   // Expose for AutoRun / debug (scope-safe)
   try {
     window.__JOB_AUTOFILL__ = window.__JOB_AUTOFILL__ || {};
-    window.__JOB_AUTOFILL__.performAutofill = performAutofill;
+    Object.assign(window.__JOB_AUTOFILL__, {
+      performAutofill,
+      uploadResume,
+      uploadCoverLetter,
+      fillInputField,
+      fillReactSelectByLabel,
+      fillByLabelKeywords,
+      showNotificationBanner,
+      updateNotificationBanner,
+    });
   } catch (e) {}
 
   // ==================== Message Listener ====================
@@ -2078,7 +2085,7 @@
 
   const formType = detectFormType();
   if (formType.detected) {
-    setTimeout(showNotificationBanner, 500);
+    setTimeout(showNotificationBanner('supported'), 500);
   }
 
   chrome.runtime.sendMessage({ type: 'CONTENT_SCRIPT_READY', url: window.location.href });
@@ -2105,30 +2112,6 @@ async function waitForFormReady({ maxTries = 30, delayMs = 400 } = {}) {
     await new Promise(r => setTimeout(r, delayMs));
   }
   return false;
-}
-
-function showAutoFillToast(message) {
-  const existing = document.getElementById('jobautofill-toast');
-  if (existing) existing.remove();
-
-  const box = document.createElement('div');
-  box.id = 'jobautofill-toast';
-  box.style.cssText = `
-    position: fixed;
-    right: 16px;
-    bottom: 16px;
-    z-index: 2147483647;
-    background: #111827;
-    color: #fff;
-    padding: 12px 14px;
-    border-radius: 10px;
-    font-size: 12px;
-    max-width: 360px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-  `;
-  box.textContent = message;
-  document.body.appendChild(box);
-  setTimeout(() => box.remove(), 9000);
 }
 
 function isAutofillTargetPage() {
@@ -2208,12 +2191,13 @@ async function autoRunIfEnabled() {
 
     const ready = await waitForFormReady();
     if (!ready) return;
+    updateNotificationBanner('running');
 
     // Greenhouse React hydration guard (prevents “filled then erased” + hydration errors)
-    if (location.hostname.includes('greenhouse.io')) {
+    if (isGreenhouseApplicationPage()) {
       const ok = await waitForGreenhouseHydration({ timeoutMs: 20000, stableMs: 1000, pollMs: 200 });
       if (!ok) {
-        console.warn('[JobAutofill][AutoRun] form not settled in time; continue in safe mode');
+        if (DEBUG) console.debug('[JobAutofill][AutoRun] form not settled in time; continue in safe mode');
       }
       await sleep(400); // small buffer
     }
@@ -2232,12 +2216,21 @@ async function autoRunIfEnabled() {
     const resumeOk = !!result?.resumeUploaded;
 
     if (filledCount > 0 || resumeOk) {
-      showAutoFillToast(`Auto-filled ${filledCount} fields${resumeOk ? ' + uploaded resume' : ''}.`);
+      window.__JOB_AUTOFILL__?.updateNotificationBanner?.('success', {
+        filledCount,
+        resumeUploaded: !!result?.resumeUploaded,
+        coverLetterUploaded: !!result?.coverLetterUploaded
+      });
     } else {
-      showAutoFillToast('Auto-fill ran, but nothing was filled.');
+      window.__JOB_AUTOFILL__?.updateNotificationBanner?.('error', {
+        message: 'Auto-fill ran, but nothing was filled.'
+      });
     }
   } catch (err) {
     console.error('[JobAutofill] Auto-run failed:', err);
+    window.__JOB_AUTOFILL__?.updateNotificationBanner?.('error', {
+      message: `Auto-run failed: ${String(err?.message || err)}`
+    });
   }
 }
 
@@ -2251,7 +2244,9 @@ autoRunIfEnabled().catch(e => console.error('[JobAutofill][AutoRun] crashed', e)
   setInterval(() => {
     if (location.href !== last) {
       last = location.href;
-      autoRunIfEnabled();
+      autoRunIfEnabled().catch(e =>
+        console.error('[JobAutofill][AutoRun] crashed (url change)', e)
+      );
     }
   }, 800);
 })();
