@@ -1,179 +1,123 @@
-# Auto-Apply Helper (BETA)
+# Auto-Apply Helper (BETA) — v0.9.5
 
-A Chrome extension that helps you autofill **Greenhouse** job application forms quickly using a Side Panel profile. Built to reduce repetitive typing, handle common Greenhouse UI patterns (including **React-Select** dropdowns), and keep your data stored locally.
+A Chrome extension that helps you **autofill job application forms** (Greenhouse-first), including **basic fields + resume/attachments upload**.
 
-> Status: **BETA** — optimized for Greenhouse applications; other ATS platforms are not supported yet.
-
----
-
-## Features
-
-### ✅ Greenhouse autofill (current focus)
-
-- Detects Greenhouse application pages and enables one-click autofill
-- Fills common fields across Profile / Work / Education / EEO sections
-- Handles:
-  - Standard `<input>` / `<textarea>` fields
-  - Native `<select>`
-  - Radio groups (common Yes/No questions)
-  - **React-Select** dropdowns (including searchable combobox-style selects)
-
-### ✅ EEO support (practical defaults)
-
-- Gender + Gender identity (prevents “male” matching “feMALE”)
-- Race/Ethnicity (single choice from side panel)
-  - Special logic: if user selects **East/South/Southeast Asian** but the form only has **Asian**, it will fall back to **Asian**
-  - Avoids adding extra race chips repeatedly on multi-select pages
-- Veteran status
-- Disability status
-- Hispanic/Latino status (where present)
-
-### ✅ Documents
-
-- Resume upload support (where Greenhouse provides file upload components)
-- (Optional) cover letter file upload where present
-
-### ✅ Local-first storage
-
-- Uses `chrome.storage.local` to save profile fields and preferences on the user’s machine.
+> Status: **BETA** — works best on Greenhouse job application pages.  
+> If you see a warning like `form not settled in time; continue in safe mode`, the extension will continue carefully without trying to “fight” the page hydration.
 
 ---
 
-## How it works (high-level)
+## ✨ What it does
 
-- **Side Panel UI** collects user profile + preferences (Profile / Work / Edu / EEO / Docs).
-- **Content script** (`content/autofill.js`) runs on Greenhouse job application pages and:
-  - detects fillable fields
-  - matches questions by label text / surrounding container text
-  - fills values using robust DOM events (including pointer-event sequences for React-Select)
-- **Service worker** coordinates messaging between the side panel and the content script (and optional notifications).
-
----
-
-## Project structure (typical)
-
-```
-
-job-application-autofill/
-├── extension/
-│   ├── manifest.json
-│   ├── content/
-│   │   └── autofill.js
-│   ├── sidepanel/
-│   │   ├── src/
-│   │   │   └── App.jsx
-│   │   └── dist/          # built output
-│   └── ... (service worker, assets, etc.)
-├── backend/               # reserved / experimental (optional)
-└── README.md
-
-```
+- Detects supported job application pages and shows an **in-page notification** with a quick action to open the side panel. :contentReference[oaicite:0]{index=0}
+- Autofills common fields (only when the field is empty to avoid overwriting your manual input):
+  - First name / Last name / Preferred name / Email / Phone
+  - City / State / ZIP
+  - LinkedIn / GitHub / Website/Portfolio
+  - School / Degree / Major/Discipline / Education years
+  - Current company
+  - Some authorization / sponsorship / demographic-like fields (best-effort, depends on how the site implements them) :contentReference[oaicite:1]{index=1}
+- Uploads attachments (Resume/CV, Cover Letter, etc.) when the form provides upload controls.
+- “Safe mode” guard on dynamic pages: if the page is still “settling” (React hydration / re-render), it will avoid aggressive actions that may break the form UI.
 
 ---
 
-## Installation (Load Unpacked)
+## ✅ Supported sites (current)
 
-1. Open Chrome → `chrome://extensions`
-2. Enable **Developer mode** (top-right)
-3. Click **Load unpacked**
-4. Select the `extension/` folder
+### Greenhouse
 
----
+- Job application pages under `*.greenhouse.io/.../jobs/<number>` are detected as application pages. :contentReference[oaicite:2]{index=2}
 
-## Usage
+### Generic application pages (best-effort)
 
-1. Open a Greenhouse application page, e.g.:
-   - `https://job-boards.greenhouse.io/<company>/jobs/<id>`
-2. Open the extension Side Panel
-3. Fill your profile fields and click **Save**
-4. Click **Fill Application**
-5. Check the form and submit manually (recommended)
+- If the page contains `#application_form` or a form whose action contains `apply`, the extension will attempt a generic autofill. :contentReference[oaicite:3]{index=3}
 
-> The extension is designed to assist — always review fields before submitting.
+> Not currently supported / unreliable: Workday-style multi-step portals, highly customized SPA portals with anti-automation guardrails.
 
 ---
 
-## Build / Dev workflow (Side Panel UI)
+## 🚀 How to use
 
-If your side panel uses Vite/React (common setup):
+1. **Install the extension**
+   - If you’re developing locally: load unpacked from `chrome://extensions` → enable **Developer mode** → **Load unpacked** → select the extension folder.
 
-```bash
-cd extension/sidepanel
-npm install
-npm run build
-````
+2. **Open a job application page**
+   - Example: a Greenhouse job page with an **Apply** form.
 
-Then:
+3. **When the notification appears**, click **“Open Panel to Update Info”**
+   - This opens the side panel where you can edit and save your profile data.
 
-* go to `chrome://extensions`
-* click **Reload** on the extension
-* reopen the side panel
-
-> If you use `npm run dev`, it typically runs a dev server, but the extension will still load the **built** assets in `dist/` unless you specifically wire dev-mode loading.
-
----
-
-## Configuration fields (Side Panel)
-
-Common fields you can store (example):
-
-* **Profile**: name, email, phone, location, LinkedIn, GitHub, portfolio/website, current company
-* **Work/Edu**: recent job title/company, degree/school, etc.
-* **EEO**: gender, race/ethnicity, veteran, disability, hispanic/latino, LGBTQ+
-* **Docs**: resume file, optional cover letter
-
-Exact fields may evolve as the project grows.
+4. **Autofill runs automatically**
+   - It will only fill fields that are currently empty.
+   - If the page is dynamic, you may see a warning:
+     - `form not settled in time; continue in safe mode`
+   - That’s expected in BETA — the extension proceeds conservatively.
 
 ---
 
-## Known limitations (BETA)
+## 🔐 Data & Privacy
 
-* Only supports **Greenhouse** reliably (others may partially work but are not a goal yet)
-* Some companies customize forms heavily (rare edge cases may still require manual entry)
-* Duplicate EEO sections can exist; logic is designed to fill repeated questions safely, but always double-check
-* EEO forms can be:
+- Your profile data is stored locally using Chrome extension storage (`chrome.storage.local`).
+- This extension does **not** sell or share your data.
+- The extension only runs on supported application pages and only uses your data to fill the form fields you see.
 
-  * single-select or multi-select
-  * searchable or fixed lists
-  * different phrasing for the same question
-    This extension uses heuristic matching to stay robust.
+> If you plan to publish to the Chrome Web Store, include a `PRIVACY_POLICY.md` in the repo and link it in the listing.
 
 ---
 
-## Privacy & Security
+## 🧰 Development
 
-* User profile data is stored in **`chrome.storage.local`** (local to your browser profile)
-* The extension does **not** submit applications automatically
-* You should review every field before final submission
-* If/when an AI API is added:
+### Debug logging
 
-  * it should be opt-in
-  * it should avoid sending sensitive data unnecessarily
-  * it should clearly disclose what is sent and why
+- The content script includes debug logs (e.g. `[JobAutofill] ...`). :contentReference[oaicite:4]{index=4}  
+- You can inspect logs via **DevTools → Console** on the job application page.
 
----
+### Typical workflow
 
-## Roadmap (next likely improvements)
-
-* Smarter question understanding (optional AI) to reduce manual mappings
-* More robust handling for “custom question” textareas and long prompts
-* Better page detection + user-friendly notifications
-* Support more ATS platforms (Workday, Lever, etc.) — after Greenhouse is rock-solid
-* More reliable file upload detection across variants
+1. Make code changes
+2. Go to `chrome://extensions`
+3. Click **Reload** on the extension
+4. Refresh the job application page
 
 ---
 
-## Contributing
+## 🩺 Troubleshooting
 
-PRs welcome. If you’re adding new form handlers:
+### “It says it filled, but the input is still empty”
 
-* prefer **label-based matching**
-* avoid brittle CSS selectors when possible
-* always skip hidden/disabled fields
-* prevent repeated runs from adding unintended extra selections
+Some sites (especially React-controlled inputs) ignore direct `element.value = ...` unless the correct native setter + input events are used.  
+In v0.9.5 we handle this more safely, but if you see regressions:
+
+- Verify the field is not being immediately overwritten by the site after your fill event
+- Check Console logs for “safe mode” or hydration-related warnings
+
+### Warning: `form not settled in time; continue in safe mode`
+
+This means the page didn’t reach a stable state quickly enough (DOM keeps changing / hydration still running).  
+The extension continues conservatively to avoid triggering hydration crashes.
+
+### React / hydration errors in the page console
+
+You may see site-owned logs like React hydration errors (Rollbar / minified react-dom).  
+These are usually **from the website itself**, and the extension’s goal is to **avoid making them worse** by running in safe mode.
+
+---
+
+## 🗺️ Roadmap (next)
+
+- Improve coverage for “basic inputs” across more Greenhouse variants
+- Better detection for multi-step application flows
+- Optional “Fill anyway” button when safe mode triggers (manual override)
+- Field mapping customization UI (user-defined selectors / aliases)
+
+---
+
+## 📌 Version
+
+- **v0.9.5 (BETA)** — Greenhouse autofill + attachments upload stabilized; safe-mode guard added for dynamic/hydrating pages.
 
 ---
 
 ## License
 
-See `LICENSE`.
+TBD (MIT recommended if you plan to open-source).
