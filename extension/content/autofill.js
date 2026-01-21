@@ -31,16 +31,11 @@
       return /\/jobs\/\d+/.test(path);
     }
     
-    // Workday: check for job apply page
-    if (window.location.hostname.includes('workday.com')) {
-      return url.includes('/job/') || url.includes('/apply');
-    }
-    
     // Generic: check for application form
     return document.querySelector('#application_form') !== null ||
            document.querySelector('form[action*="apply"]') !== null;
   }
-  
+
   function showNotificationBanner() {
     if (document.getElementById('job-autofill-notif')) return;
     if (sessionStorage.getItem('job-autofill-dismissed')) return;
@@ -144,7 +139,7 @@
         </div>
         
         <div style="font-size: 13px; color: #374151; margin-bottom: 14px; line-height: 1.4;">
-          This page is supported! Click below to autofill.
+          This page is supported! Autofilling for you now...
         </div>
         
         <button id="job-autofill-btn" style="
@@ -166,7 +161,7 @@
           <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
             <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
           </svg>
-          Open Autofill Panel
+          Open Panel to Update Info
         </button>
       </div>
     `;
@@ -509,7 +504,9 @@
     }
 
     // D) text input fallback
-    const textInputs = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'));
+    const textInputs = Array.from(document.querySelectorAll(
+      'input[type="text"], input[type="email"], input[type="url"], input:not([type])'
+    ));
     for (const input of textInputs) {
       const lab = labelTextForInput(input);
       if (!matchesAnyKeyword(lab, keywords)) continue;
@@ -979,24 +976,46 @@
 
   // ==================== Form Filling Helpers ====================
 
-  function fillInputField(element, value) {
-    if (!element || !value) return false;
-    
-    // IMPORTANT: Only fill if the field is currently empty
-    // This prevents overwriting user's manual input
-    if (!isFieldEmpty(element)) {
-      log(` Skipping non-empty field: ${element.name || element.id || 'unknown'}`);
-      return false;
+  function setNativeValue(el, value) {
+    const proto =
+      el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+
+    const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+    const setter = desc && desc.set;
+
+    if (setter) setter.call(el, value);
+    else el.value = value;
+  }
+
+  function setReactInputValue(el, value) {
+    const lastValue = el.value;
+
+    // React 16+ tracks value changes
+    if (el._valueTracker) {
+      el._valueTracker.setValue(lastValue);
     }
-    
+
+    const proto = el instanceof HTMLTextAreaElement
+      ? HTMLTextAreaElement.prototype
+      : HTMLInputElement.prototype;
+
+    const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+    desc.set.call(el, value);
+
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function fillInputField(element, value) {
+    if (!element || value == null || value === "") return false;
+    if (!isFieldEmpty(element)) return false;
+
     element.focus();
-    element.value = value;
-    
-    element.dispatchEvent(new Event('input', { bubbles: true }));
-    element.dispatchEvent(new Event('change', { bubbles: true }));
-    element.dispatchEvent(new Event('blur', { bubbles: true }));
-    
-    log(` Filled input: ${element.name || element.id || 'unknown'} = ${value}`);
+    setReactInputValue(element, value);
+    // (Optional) avoid blur if it triggers validation/reset:
+    // element.blur();
+
+    console.log(`[JobAutofill] Filled input: ${element.name || element.id || 'unknown'} = ${value}`);
     return true;
   }
 
@@ -1069,19 +1088,80 @@
   }
 
   function hasWholeWord(text, word) {
-  const w = (word || '').toLowerCase().trim();
-  if (!w) return false;
-  return new RegExp(`\\b${escapeRegExp(w)}\\b`, 'i').test(text);
-}
+    const w = (word || '').toLowerCase().trim();
+    if (!w) return false;
+    return new RegExp(`\\b${escapeRegExp(w)}\\b`, 'i').test(text);
+  }
 
   function normalizeToken(s) {
     return (s || "").toLowerCase().trim();
   }
 
-  function setNativeInputValue(input, value) {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-    setter?.call(input, value);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
+  function hasReactInternals(node) {
+    if (!node) return false;
+
+    // React 18/17 常见：__reactFiber$xxxx / __reactContainer$xxxx / __reactProps$xxxx
+    const names = Object.getOwnPropertyNames(node);
+    return names.some(k =>
+      k.startsWith('__reactFiber$') ||
+      k.startsWith('__reactContainer$') ||
+      k.startsWith('__reactProps$') ||
+      k.startsWith('__reactEvents$')
+    );
+  }
+
+  async function waitForDomStable(root, { timeoutMs = 12000, stableMs = 700, pollMs = 200 } = {}) {
+    const start = Date.now();
+    let lastMutation = Date.now();
+    let observer;
+
+    try {
+      observer = new MutationObserver(() => { lastMutation = Date.now(); });
+      observer.observe(root, { subtree: true, childList: true, attributes: true });
+    } catch (_) {}
+
+    while (Date.now() - start < timeoutMs) {
+      // “Stable” means: no mutations for stableMs
+      if (Date.now() - lastMutation >= stableMs) {
+        observer && observer.disconnect();
+        return true;
+      }
+      await sleep(pollMs);
+    }
+
+    observer && observer.disconnect();
+    return false;
+  }
+
+  async function waitForGreenhouseHydration(
+    { timeoutMs = 12000, stableMs = 700, pollMs = 200 } = {}
+  ) {
+    const form =
+      document.querySelector('#application_form') ||
+      document.querySelector('form[action*="apply"]');
+
+    if (!form) return false;
+
+    // Wait until the form stops changing (hydration finished enough)
+    const ok = await waitForDomStable(form, { timeoutMs, stableMs, pollMs });
+    return ok;
+  }
+
+  function setNativeInputValue(el, value) {
+    const v = String(value ?? '');
+
+    if (!el) return;
+    const tag = (el.tagName || '').toUpperCase();
+
+    let proto = null;
+    if (tag === 'TEXTAREA') proto = HTMLTextAreaElement.prototype;
+    else if (tag === 'SELECT') proto = HTMLSelectElement.prototype;
+    else proto = HTMLInputElement.prototype;
+
+    const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+    const setter = desc && desc.set;
+    if (setter) setter.call(el, v);
+    else el.value = v;
   }
 
   function dispatchMouseLikeClick(el) {
@@ -1353,6 +1433,32 @@
     return false;
   }
 
+  function isVisibleInteractive(el) {
+    if (!el) return false;
+    if (el.disabled) return false;
+
+    // input type=hidden
+    const type = (el.getAttribute?.('type') || '').toLowerCase();
+    if (type === 'hidden') return false;
+
+    // hidden by attributes
+    if (el.closest?.('[hidden], [aria-hidden="true"]')) return false;
+
+    // hidden by CSS
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+
+    // zero-size
+    const rect = el.getBoundingClientRect?.();
+    if (!rect || rect.width < 2 || rect.height < 2) return false;
+
+    return true;
+  }
+
+  function elementArea(el) {
+    const r = el.getBoundingClientRect?.();
+    return (r?.width || 0) * (r?.height || 0);
+  }
 
   // ==================== Main Fill Functions ====================
 
@@ -1365,7 +1471,14 @@
     for (const selector of selectors) {
       try {
         const elements = document.querySelectorAll(selector);
-        for (const element of elements) {
+        // Prefer visible/interactive elements (Greenhouse often has hidden duplicates)
+        const uniq = Array.from(new Set(elements));
+        const visibles = uniq
+          .filter(isVisibleInteractive)
+          .sort((a, b) => elementArea(b) - elementArea(a));
+
+        const candidates = visibles.length ? visibles : uniq;
+        for (const element of candidates) {
           if (element) {
             if (element.tagName === 'SELECT') {
               if (fillSelectField(element, value)) return true;
@@ -1826,16 +1939,30 @@
       'current_company',
       'linkedin', 'github', 'website'
     ];
+
+    const BASIC_LABEL_KEYWORDS = {
+      first_name: ['first name'],
+      last_name: ['last name'],
+      preferred_first_name: ['preferred first', 'preferred name'],
+      email: ['email'],
+      linkedin: ['linkedin'],
+      github: ['github'],
+      website: ['portfolio', 'website', 'personal website'],
+      current_company: ['current company', 'company'],
+    };
     
     for (const fieldName of standardFields) {
       const value = dataToFill[fieldName];
-      if (value) {
-        if (fillField(fieldName, value, FIELD_MAPPINGS)) {
-          results.filled.push(fieldName);
-        }
-        // Note: if fillField returns false, it might be because field was already filled
-        // We don't add to failed in this case
+      if (!value) continue;
+
+      let ok = fillField(fieldName, value, FIELD_MAPPINGS);
+
+      // Fallback: fill by label text (more robust on Greenhouse)
+      if (!ok && BASIC_LABEL_KEYWORDS[fieldName]) {
+        ok = await fillByLabelKeywords(BASIC_LABEL_KEYWORDS[fieldName], value);
       }
+
+      if (ok) results.filled.push(fieldName);
     }
     
     // Handle phone separately with country code
@@ -1914,6 +2041,12 @@
     log(' Results:', results);
     return results;
   }
+  
+  // Expose for AutoRun / debug (scope-safe)
+  try {
+    window.__JOB_AUTOFILL__ = window.__JOB_AUTOFILL__ || {};
+    window.__JOB_AUTOFILL__.performAutofill = performAutofill;
+  } catch (e) {}
 
   // ==================== Message Listener ====================
 
@@ -1951,4 +2084,175 @@
   chrome.runtime.sendMessage({ type: 'CONTENT_SCRIPT_READY', url: window.location.href });
   log(' Content script loaded on:', window.location.href);
   
+
+
+// ====================  AUTO-RUN on Greenhouse pages
+function pageRunKey() {
+  // One run per URL (prevents repeated uploads/fills on same page)
+  return `jobautofill_done:${location.href}`;
+}
+
+async function waitForFormReady({ maxTries = 30, delayMs = 400 } = {}) {
+  for (let i = 0; i < maxTries; i++) {
+    const hasSomethingToFill =
+      document.querySelector('#application_form') ||
+      document.querySelector('form[action*="apply"]') ||
+      document.querySelector('input[id^="question_"]') ||
+      document.querySelector('input.select__input[role="combobox"]') ||
+      document.querySelector('input[type="file"]');
+
+    if (hasSomethingToFill) return true;
+    await new Promise(r => setTimeout(r, delayMs));
+  }
+  return false;
+}
+
+function showAutoFillToast(message) {
+  const existing = document.getElementById('jobautofill-toast');
+  if (existing) existing.remove();
+
+  const box = document.createElement('div');
+  box.id = 'jobautofill-toast';
+  box.style.cssText = `
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 2147483647;
+    background: #111827;
+    color: #fff;
+    padding: 12px 14px;
+    border-radius: 10px;
+    font-size: 12px;
+    max-width: 360px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+  `;
+  box.textContent = message;
+  document.body.appendChild(box);
+  setTimeout(() => box.remove(), 9000);
+}
+
+function isAutofillTargetPage() {
+  const host = window.location.hostname;
+  const path = window.location.pathname;
+
+  // Greenhouse: URL contains /jobs/<number>
+  if (host.includes('greenhouse.io') && /\/jobs\/\d+/.test(path)) return true;
+
+  // Generic: application form exists
+  return document.querySelector('#application_form') !== null ||
+         document.querySelector('form[action*="apply"]') !== null;
+}
+
+function basicFieldsStillEmpty(userData) {
+  if (!userData) return false;
+
+  const checks = [
+    ['first_name', 'input#first_name, input[name="first_name"]'],
+    ['last_name',  'input#last_name,  input[name="last_name"]'],
+    ['email',      'input#email,      input[name="email"]'],
+  ];
+
+  return checks.some(([k, sel]) => {
+    const want = userData[k];
+    if (!want) return false;
+    const el = document.querySelector(sel);
+    return el && isFieldEmpty(el);
+  });
+}
+
+function installOneShotPostHydrationRetry({ userData, resumeData, coverLetterData, delayMs = 1800 } = {}) {
+  if (window.__JOB_AUTOFILL_POST_RETRY_DONE__) return;
+  window.__JOB_AUTOFILL_POST_RETRY_DONE__ = true;
+
+  const run = async (reason) => {
+    if (!basicFieldsStillEmpty(userData)) return;
+    log(`[JobAutofill][AutoRun] post-hydration retry (${reason})...`);
+    try {
+      await performAutofill(userData, resumeData, coverLetterData);
+    } catch (e) {
+      console.warn('[JobAutofill][AutoRun] post-hydration retry failed', e);
+    }
+  };
+
+  // timer retry
+  setTimeout(() => run('timer'), delayMs);
+
+  // first user gesture retry
+  const handler = () => {
+    window.removeEventListener('pointerdown', handler, true);
+    window.removeEventListener('keydown', handler, true);
+    window.removeEventListener('scroll', handler, true);
+    run('user-gesture');
+  };
+
+  window.addEventListener('pointerdown', handler, true);
+  window.addEventListener('keydown', handler, true);
+  window.addEventListener('scroll', handler, true);
+}
+
+
+async function autoRunIfEnabled() {
+  console.log('[JobAutofill][AutoRun] entered', location.href);
+  try {
+    if (!isAutofillTargetPage()) return;
+
+    const key = pageRunKey();
+    if (sessionStorage.getItem(key) === '1') return;
+
+    const { autoFillEnabled = true, userData, resumeData, coverLetterData } =
+      await chrome.storage.local.get(['autoFillEnabled', 'userData', 'resumeData', 'coverLetterData']);
+
+    // 只有明确设置为 false 才禁用；undefined 视为开启（兼容旧数据）
+    if (autoFillEnabled === false) return;
+    if (!userData) return;
+
+    const ready = await waitForFormReady();
+    if (!ready) return;
+
+    // Greenhouse React hydration guard (prevents “filled then erased” + hydration errors)
+    if (location.hostname.includes('greenhouse.io')) {
+      const ok = await waitForGreenhouseHydration({ timeoutMs: 20000, stableMs: 1000, pollMs: 200 });
+      if (!ok) {
+        console.warn('[JobAutofill][AutoRun] form not settled in time; continue in safe mode');
+      }
+      await sleep(400); // small buffer
+    }
+
+    // Mark as done BEFORE running to avoid double-runs
+    sessionStorage.setItem(key, '1');
+
+    console.log('[JobAutofill] Auto-run starting...', location.href);
+    const result = await performAutofill(userData, resumeData, coverLetterData);
+
+    if (location.hostname.includes('greenhouse.io')) {
+      installOneShotPostHydrationRetry({ userData, resumeData, coverLetterData });
+    }
+
+    const filledCount = Array.isArray(result?.filled) ? result.filled.length : 0;
+    const resumeOk = !!result?.resumeUploaded;
+
+    if (filledCount > 0 || resumeOk) {
+      showAutoFillToast(`Auto-filled ${filledCount} fields${resumeOk ? ' + uploaded resume' : ''}.`);
+    } else {
+      showAutoFillToast('Auto-fill ran, but nothing was filled.');
+    }
+  } catch (err) {
+    console.error('[JobAutofill] Auto-run failed:', err);
+  }
+}
+
+// Run once on initial load
+console.log('[JobAutofill][AutoRun] calling...');
+autoRunIfEnabled().catch(e => console.error('[JobAutofill][AutoRun] crashed', e));
+
+// Handle URL changes (SPA-ish navigation / consecutive job pages in same tab)
+(function watchUrlChanges() {
+  let last = location.href;
+  setInterval(() => {
+    if (location.href !== last) {
+      last = location.href;
+      autoRunIfEnabled();
+    }
+  }, 800);
+})();
 })();

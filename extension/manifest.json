@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Auto-Apply Helper Developer Edition",
   "version": "0.9.2",
-  "description": "Helps fill out forms on ATS job applications with one click. Supports multiple resumes and EEO fields.",
+  "description": "Helps fill out forms on ATS job applications with one click. Supports EEO fields.",
   
   "permissions": [
     "storage",
@@ -14,9 +14,7 @@
   "host_permissions": [
     "https://boards.greenhouse.io/*",
     "https://job-boards.greenhouse.io/*",
-    "https://*.greenhouse.io/*",
-    "https://*.myworkday.com/*",
-    "https://*.icims.com/*"
+    "https://*.greenhouse.io/*"
   ],
   
   "action": {
@@ -36,8 +34,7 @@
       "matches": [
         "https://boards.greenhouse.io/*",
         "https://job-boards.greenhouse.io/*",
-        "https://*.greenhouse.io/*",
-        "https://*.myworkday.com/*"
+        "https://*.greenhouse.io/*"
       ],
       "js": ["content/autofill.js"],
       "run_at": "document_idle"

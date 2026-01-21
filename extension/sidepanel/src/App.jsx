@@ -267,7 +267,7 @@ function App() {
       phone_full: getFullPhoneNumber(),
       needs_sponsorship: needsSponsorship()
     }
-    await storage.set({ userData: dataToSave })
+    await storage.set({ userData: dataToSave, autoFillEnabled: true })
     setSaveStatus(prev => ({ ...prev, [activeTab]: 'saved' }))
     setStatus({ type: 'success', message: 'Saved!' })
     setTimeout(() => setStatus({ type: '', message: '' }), 2000)
