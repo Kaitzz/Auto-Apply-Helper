@@ -40,6 +40,17 @@
       "run_at": "document_idle"
     }
   ],
+
+  "web_accessible_resources": [
+    {
+      "resources": ["content/page_debug_bridge.js"],
+      "matches": [
+        "https://boards.greenhouse.io/*",
+        "https://job-boards.greenhouse.io/*",
+        "https://*.greenhouse.io/*"
+      ]
+    }
+  ],
   
   "icons": {
     "16": "icons/icon16.png",

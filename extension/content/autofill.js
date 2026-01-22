@@ -419,6 +419,184 @@
 
     return "";
   }
+  // ==================== Phase 0: Scan unanswered questions ====================
+
+  function isVisibleElement(el) {
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  function cleanText(s) {
+    return (s || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function isRequiredFromLabel(labelEl) {
+    if (!labelEl) return false;
+    // Greenhouse often uses "*" for required fields
+    return /\*\s*$/.test(cleanText(labelEl.textContent));
+  }
+
+  function isFileUploadBlock(block) {
+    return !!block.querySelector('input[type="file"]');
+  }
+
+  function getBlockLabel(block) {
+    const labelEl = block.querySelector('label');
+    const label = cleanText(labelEl?.textContent || '');
+    return { label, labelEl };
+  }
+
+  function reactSelectMetaFromShell(shell) {
+    const isMulti = !!shell.querySelector('.select__multi-value');
+    const single = shell.querySelector('.select__single-value');
+    const placeholder = shell.querySelector('.select__placeholder');
+    const selectedText =
+      isMulti
+        ? Array.from(shell.querySelectorAll('.select__multi-value__label')).map(x => cleanText(x.textContent)).filter(Boolean)
+        : (single ? cleanText(single.textContent) : '');
+    const hasSelection = isMulti ? selectedText.length > 0 : (!!selectedText && !/select/i.test(selectedText));
+    const placeholderText = cleanText(placeholder?.textContent || '');
+    return { isMulti, hasSelection, selectedText, placeholderText };
+  }
+
+  function findPrimaryControl(block) {
+    // Priority: react-select > native select > textarea > radios > checkboxes > text inputs
+    const shell = block.querySelector('.select-shell, [class*="select-shell"]');
+    if (shell) {
+      const input = shell.querySelector('input[role="combobox"], input.select__input');
+      return { kind: 'react-select', el: input || shell, shell };
+    }
+
+    const sel = block.querySelector('select');
+    if (sel) return { kind: 'select', el: sel };
+
+    const ta = block.querySelector('textarea');
+    if (ta) return { kind: 'textarea', el: ta };
+
+    const radios = block.querySelectorAll('input[type="radio"]');
+    if (radios && radios.length) return { kind: 'radio', el: radios[0] };
+
+    const checks = block.querySelectorAll('input[type="checkbox"]');
+    if (checks && checks.length) return { kind: 'checkbox', el: checks[0] };
+
+    const inp = block.querySelector('input[type="text"], input:not([type]), input[type="email"], input[type="tel"]');
+    if (inp) return { kind: 'input', el: inp };
+
+    return null;
+  }
+
+  function isAnsweredControl(kind, el, block, shell) {
+    try {
+      if (kind === 'react-select') {
+        const meta = reactSelectMetaFromShell(shell);
+        return meta.hasSelection;
+      }
+
+      if (kind === 'select') {
+        const v = (el.value || '').trim();
+        const txt = cleanText(el.selectedOptions?.[0]?.textContent || '');
+        if (!v) return false;
+        if (/select/i.test(txt)) return false;
+        return true;
+      }
+
+      if (kind === 'textarea' || kind === 'input') {
+        // prefer property value; fallback to attribute value
+        const v = (el.value ?? '').toString();
+        return v.trim().length > 0;
+      }
+
+      if (kind === 'radio') {
+        const name = el.name;
+        if (!name) return false;
+        return !!block.querySelector(`input[type="radio"][name="${CSS.escape(name)}"]:checked`);
+      }
+
+      if (kind === 'checkbox') {
+        const name = el.name;
+        if (name) {
+          return !!block.querySelector(`input[type="checkbox"][name="${CSS.escape(name)}"]:checked`);
+        }
+        // unnamed checkbox: treat checked as answered
+        return !!block.querySelector('input[type="checkbox"]:checked');
+      }
+    } catch (e) {
+      // ignore
+    }
+    return false;
+  }
+
+  /**
+   * Scan unanswered questions on the current application form.
+   * Returns an array of question descriptors:
+   * { label, kind, required, id, name, placeholder, selectedText, isMulti }
+   */
+  function scanUnansweredQuestions() {
+    const root = document.querySelector('#application_form') || document;
+    // Greenhouse typical blocks are ".field" but some sites use ".question"
+    const blocks = Array.from(root.querySelectorAll('.field, .question, [class*="field"], [class*="question"]'));
+
+    const results = [];
+    const seen = new Set();
+
+    for (const block of blocks) {
+      if (!block || !isVisibleElement(block)) continue;
+      if (isFileUploadBlock(block)) continue; // Phase 0: ignore uploads
+
+      const { label, labelEl } = getBlockLabel(block);
+      if (!label) continue;
+
+      const ctrl = findPrimaryControl(block);
+      if (!ctrl) continue;
+
+      const { kind, el, shell } = ctrl;
+
+      // Build a stable-ish key to dedupe
+      const id = (el && el.id) ? el.id : '';
+      const name = (el && el.name) ? el.name : '';
+      const key = `${kind}|${id}|${name}|${label}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const required =
+        isRequiredFromLabel(labelEl) ||
+        (el && el.getAttribute && el.getAttribute('aria-required') === 'true') ||
+        (el && el.required === true);
+
+      const answered = isAnsweredControl(kind, el, block, shell);
+      if (answered) continue;
+
+      // optional metadata
+      let placeholder = '';
+      let selectedText = [];
+      let isMulti = false;
+
+      if (kind === 'react-select') {
+        const meta = reactSelectMetaFromShell(shell);
+        placeholder = meta.placeholderText || '';
+        selectedText = meta.selectedText || [];
+        isMulti = meta.isMulti;
+      } else if (kind === 'input' || kind === 'textarea') {
+        placeholder = cleanText(el.getAttribute?.('placeholder') || '');
+      }
+
+      results.push({
+        label,
+        kind,
+        required,
+        id: id || null,
+        name: name || null,
+        placeholder: placeholder || null,
+        isMulti: kind === 'react-select' ? isMulti : null,
+        selectedText: kind === 'react-select' ? selectedText : null,
+      });
+    }
+
+    return results;
+  }
 
   function matchesAnyKeyword(labelText, keywords) {
     const t = (labelText || '').toLowerCase();
@@ -2039,7 +2217,198 @@
     log(' Results:', results);
     return results;
   }
-  
+
+  function scanUnansweredQuestions({ root = document } = {}) {
+    const form =
+      root.querySelector?.('#application_form') ||
+      root.querySelector?.('form') ||
+      null;
+
+    if (!form) return [];
+
+    const out = [];
+    const seen = new Set();
+
+    const isInteractable = (el) => {
+      if (!el) return false;
+      if (!document.contains(el)) return false;
+      if (el.disabled) return false;
+
+      const style = window.getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden') return false;
+
+      const rect = el.getBoundingClientRect?.();
+      if (!rect || rect.width === 0 || rect.height === 0) return false;
+
+      return true;
+    };
+
+    const isRequired = (el) => {
+      if (!el) return false;
+      if (el.required) return true;
+      const ariaReq = el.getAttribute?.('aria-required');
+      if (ariaReq === 'true') return true;
+      // Greenhouse 常见 required 标记（尽量温和，不一定每站都准）
+      const field = el.closest?.('.field, .application-question, [data-test="question"]');
+      if (field && field.querySelector?.('.required, [aria-required="true"]')) return true;
+      return false;
+    };
+
+    const safeLabel = (el) => {
+      try {
+        // 你文件里已有 labelTextForInput（用于按 label 填 react select 等）:contentReference[oaicite:3]{index=3}
+        if (typeof labelTextForInput === 'function') {
+          const t = labelTextForInput(el);
+          if (t) return t;
+        }
+      } catch (_) {}
+      return (
+        el.getAttribute?.('aria-label') ||
+        el.getAttribute?.('placeholder') ||
+        el.name ||
+        el.id ||
+        'unknown'
+      );
+    };
+
+    const add = (item) => {
+      if (!item) return;
+      const key = item.key || `${item.kind}:${item.name || item.id || item.label}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({ ...item, key });
+    };
+
+    // 1) text-ish inputs + textarea
+    const textLike = form.querySelectorAll('input, textarea');
+    for (const el of textLike) {
+      if (!isInteractable(el)) continue;
+
+      const tag = el.tagName.toLowerCase();
+      const type = (el.getAttribute('type') || '').toLowerCase();
+
+      if (tag === 'input') {
+        if (['hidden', 'submit', 'button', 'reset', 'file', 'checkbox', 'radio'].includes(type)) continue;
+      }
+
+      // react-select 自己单独处理（它的 input.value 常常为空，但其实有选中项）
+      if (el.matches?.('input.select__input[role="combobox"]')) continue;
+
+      // 你文件里已有 isFieldEmpty()（你一直在用它避免覆盖用户输入）——有则复用，否则退化判断
+      const empty =
+        (typeof isFieldEmpty === 'function') ? isFieldEmpty(el) : !String(el.value || '').trim();
+
+      if (empty) {
+        add({
+          kind: tag === 'textarea' ? 'textarea' : 'input',
+          id: el.id || '',
+          name: el.name || '',
+          label: safeLabel(el),
+          required: isRequired(el),
+          selector: el.id ? `#${CSS.escape(el.id)}` : '',
+        });
+      }
+    }
+
+    // 2) native <select>
+    for (const el of form.querySelectorAll('select')) {
+      if (!isInteractable(el)) continue;
+      const v = el.value;
+      const empty = v == null || String(v).trim() === '';
+      if (empty) {
+        const opts = Array.from(el.options || [])
+          .map(o => (o?.textContent || '').trim())
+          .filter(Boolean)
+          .slice(0, 50);
+        add({
+          kind: 'select',
+          id: el.id || '',
+          name: el.name || '',
+          label: safeLabel(el),
+          required: isRequired(el),
+          options: opts,
+          selector: el.id ? `#${CSS.escape(el.id)}` : '',
+        });
+      }
+    }
+
+    // 3) react-select (Greenhouse 常见) —— 复用你已有的 reactSelectHasAnySelection :contentReference[oaicite:4]{index=4}
+    for (const el of form.querySelectorAll('input.select__input[role="combobox"]')) {
+      if (!isInteractable(el)) continue;
+
+      const hasSelection =
+        (typeof reactSelectHasAnySelection === 'function')
+          ? reactSelectHasAnySelection(el)
+          : !!el.closest?.('.select__control')?.querySelector?.('.select__single-value,.select__multi-value');
+
+      if (!hasSelection) {
+        add({
+          kind: 'react-select',
+          id: el.id || '',
+          name: el.name || '',
+          label: safeLabel(el),
+          required: isRequired(el),
+        });
+      }
+    }
+
+    // 4) radio groups
+    const radios = Array.from(form.querySelectorAll('input[type="radio"]')).filter(isInteractable);
+    const byName = new Map();
+    for (const r of radios) {
+      const n = r.name || r.getAttribute('name') || '';
+      if (!n) continue;
+      if (!byName.has(n)) byName.set(n, []);
+      byName.get(n).push(r);
+    }
+    for (const [name, group] of byName.entries()) {
+      const anyChecked = group.some(r => r.checked);
+      if (anyChecked) continue;
+
+      const first = group[0];
+      const fieldset = first.closest?.('fieldset');
+      const legend = fieldset?.querySelector?.('legend')?.textContent?.trim();
+      const label = legend || safeLabel(first);
+
+      const options = group
+        .map(r => {
+          const id = r.id;
+          const l = id ? form.querySelector(`label[for="${CSS.escape(id)}"]`) : null;
+          return (l?.textContent || '').trim();
+        })
+        .filter(Boolean)
+        .slice(0, 50);
+
+      // 只有当它“看起来像 required”时才列为 unanswered（否则很多站点 radio 是可选的）
+      const required = group.some(isRequired);
+      if (required) {
+        add({ kind: 'radio', name, label, required: true, options });
+      }
+    }
+
+    // 5) checkbox groups（同样只在 required 时列出来，避免噪音）
+    const cbs = Array.from(form.querySelectorAll('input[type="checkbox"]')).filter(isInteractable);
+    const cbByName = new Map();
+    for (const c of cbs) {
+      const n = c.name || c.getAttribute('name') || '';
+      if (!n) continue;
+      if (!cbByName.has(n)) cbByName.set(n, []);
+      cbByName.get(n).push(c);
+    }
+    for (const [name, group] of cbByName.entries()) {
+      const anyChecked = group.some(c => c.checked);
+      if (anyChecked) continue;
+
+      const required = group.some(isRequired);
+      if (!required) continue;
+
+      const first = group[0];
+      add({ kind: 'checkbox', name, label: safeLabel(first), required: true });
+    }
+
+    return out;
+  }
+
   // Expose for AutoRun / debug (scope-safe)
   try {
     window.__JOB_AUTOFILL__ = window.__JOB_AUTOFILL__ || {};
@@ -2052,8 +2421,50 @@
       fillByLabelKeywords,
       showNotificationBanner,
       updateNotificationBanner,
+      scanUnansweredQuestions,
     });
   } catch (e) {}
+
+  function installPageDebugBridge() {
+    // 1) Content script listens to page messages
+    window.addEventListener('message', (ev) => {
+      const msg = ev.data;
+      if (!msg || msg.source !== 'JOB_AUTOFILL_PAGE') return;
+
+      if (msg.type === 'SCAN_UNANSWERED') {
+        let payload = [];
+        try {
+          payload = scanUnansweredQuestions();
+        } catch (e) {
+          payload = { error: String(e?.message || e) };
+        }
+        window.postMessage({
+          source: 'JOB_AUTOFILL_CONTENT',
+          type: 'SCAN_UNANSWERED_RESULT',
+          requestId: msg.requestId,
+          payload
+        }, '*');
+      }
+    });
+
+    // 2) Inject a tiny helper into page world (CSP-safe: external script, not inline)
+    try {
+      const s = document.createElement('script');
+      s.src = chrome.runtime.getURL('content/page_debug_bridge.js');
+      s.async = false;
+      s.onload = () => { try { s.remove(); } catch (e) {} };
+      s.onerror = () => { try { s.remove(); } catch (e) {} };
+      (document.head || document.documentElement).appendChild(s);
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  // Only install bridge in DEBUG to reduce surface area
+  if (typeof DEBUG !== 'undefined' && DEBUG) {
+    installPageDebugBridge();
+  }
+
 
   // ==================== Message Listener ====================
 
@@ -2075,7 +2486,13 @@
       case 'PING':
         sendResponse({ status: 'ready', formType: detectFormType() });
         break;
-        
+      
+      case 'SCAN_UNANSWERED': {
+        const unanswered = scanUnansweredQuestions();
+        sendResponse({ count: unanswered.length, unanswered });
+        break;
+      }
+
       default:
         log(' Unknown message:', message.type);
     }
@@ -2214,13 +2631,18 @@ async function autoRunIfEnabled() {
 
     const filledCount = Array.isArray(result?.filled) ? result.filled.length : 0;
     const resumeOk = !!result?.resumeUploaded;
+    const unanswered = window.__JOB_AUTOFILL__?.scanUnansweredQuestions?.() || [];
+    await chrome.storage.local.set({
+      lastUnanswered: { url: location.href, ts: Date.now(), unanswered }
+    });
 
     if (filledCount > 0 || resumeOk) {
       window.__JOB_AUTOFILL__?.updateNotificationBanner?.('success', {
-        filledCount,
-        resumeUploaded: !!result?.resumeUploaded,
-        coverLetterUploaded: !!result?.coverLetterUploaded
-      });
+      filledCount,
+      resumeUploaded: !!result?.resumeUploaded,
+      coverLetterUploaded: !!result?.coverLetterUploaded,
+      unansweredCount: unanswered.length,
+    });
     } else {
       window.__JOB_AUTOFILL__?.updateNotificationBanner?.('error', {
         message: 'Auto-fill ran, but nothing was filled.'
