@@ -37,9 +37,11 @@ A Chrome extension that helps you **autofill job application forms** (Greenhouse
 1. Get a Claude API key from [Anthropic Console](https://console.anthropic.com/)
 2. Copy `extension/config.js` to `extension/config.local.js`
 3. Add your API key in `config.local.js`:
+
    ```javascript
    const CLAUDE_API_KEY_LOCAL = 'your-api-key-here';
    ```
+
 4. Reload the extension
 
 ---

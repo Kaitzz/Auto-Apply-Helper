@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Auto-Apply Helper Developer Edition",
-  "version": "0.9.5",
-  "description": "Helps fill out forms on ATS job applications with one click. Supports EEO fields.",
+  "version": "0.9.6",
+  "description": "Helps fill out forms on ATS job applications with one click. Supports EEO fields and AI-powered custom question answering.",
   
   "permissions": [
     "storage",
