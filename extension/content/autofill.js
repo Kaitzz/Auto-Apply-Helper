@@ -2910,57 +2910,6 @@
     });
   } catch (e) {}
 
-  function installPageDebugBridge() {
-    // 1) Content script listens to page messages
-    window.addEventListener('message', async (ev) => {
-      const msg = ev.data;
-      if (!msg || msg.source !== 'JOB_AUTOFILL_PAGE') return;
-
-      if (msg.type === 'SCAN_UNANSWERED') {
-        const includeOptions = msg.includeOptions ?? true;
-        const maxOptionsPreview = msg.maxOptionsPreview ?? 30;
-        const asReactSelectRows = msg.asReactSelectRows ?? true;
-
-        scanUnansweredQuestions({ includeOptions, maxOptionsPreview, asReactSelectRows })
-          .then(unanswered => {
-            // Reply back to page context via postMessage
-            window.postMessage({
-              source: 'JOB_AUTOFILL_CONTENT',
-              type: 'SCAN_UNANSWERED_RESULT',
-              ok: true,
-              unanswered,
-              count: unanswered.length
-            }, '*');
-          })
-          .catch(err => {
-            window.postMessage({
-              source: 'JOB_AUTOFILL_CONTENT',
-              type: 'SCAN_UNANSWERED_RESULT',
-              ok: false,
-              error: String(err)
-            }, '*');
-          });
-      }
-    });
-
-    // 2) Inject a tiny helper into page world (CSP-safe: external script, not inline)
-    try {
-      const s = document.createElement('script');
-      s.src = chrome.runtime.getURL('content/page_debug_bridge.js');
-      s.async = false;
-      s.onload = () => { try { s.remove(); } catch (e) {} };
-      s.onerror = () => { try { s.remove(); } catch (e) {} };
-      (document.head || document.documentElement).appendChild(s);
-    } catch (e) {
-      // ignore
-    }
-  }
-
-  // Only install bridge in DEBUG to reduce surface area
-  if (typeof DEBUG !== 'undefined' && DEBUG) {
-    installPageDebugBridge();
-  }
-
 
   // ==================== Message Listener ====================
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
