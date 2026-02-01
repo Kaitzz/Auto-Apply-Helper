@@ -6,7 +6,7 @@
 
   // ==================== Configuration ====================
   
-  // Set to false for production release
+  // Set to false for production
   const DEBUG = true;
   
   // Conditional logging - only logs when DEBUG is true
@@ -17,24 +17,13 @@
   if (window.__jobAutofillLoaded) return;
   window.__jobAutofillLoaded = true;
 
+  // Global upload state - once true, stays true (survives retries)
+  let __resumeUploadedOnce = false;
+  let __coverLetterUploadedOnce = false;
+
   // ==================== In-Page Notification ====================
   
-  // Check if current page is an actual job application page (not a listing page)
-  function isApplicationPage() {
-    const url = window.location.href;
-    const path = window.location.pathname;
-    
-    // Greenhouse: must have /jobs/ followed by a number
-    if (window.location.hostname.includes('greenhouse.io')) {
-      return /\/jobs\/\d+/.test(path);
-    }
-    
-    // Generic: check for application form
-    return document.querySelector('#application_form') !== null ||
-           document.querySelector('form[action*="apply"]') !== null;
-  }
-
-  // ---------- Persistent “Supported” Banner (no auto-dismiss) ----------
+  // Persistent "Supported" Banner (no auto-dismiss) ----------
   let __jobAutofillBannerState = 'supported'; // supported | running | success | error
 
   function bannerDismissKey() {
@@ -59,7 +48,7 @@
     notif = document.createElement('div');
     notif.id = 'job-autofill-notif';
     notif.style.position = 'fixed';
-    // ✅ top-right (instead of bottom-right)
+    // top-right (instead of bottom-right)
     notif.style.top = '16px';
     notif.style.right = '16px';
     notif.style.bottom = 'auto';
@@ -337,15 +326,6 @@
     'select[name*="visa" i]',
     'select[id*="visa" i]'
   ];
-  
-  // Label keywords for sponsorship detection
-  const SPONSORSHIP_LABEL_KEYWORDS = [
-    'visa sponsorship',
-    'sponsorship',
-    'require sponsor',
-    'need sponsor',
-    'immigration sponsor'
-  ];
 
   // ==================== Detection ====================
 
@@ -433,22 +413,6 @@
     return (s || '').replace(/\s+/g, ' ').trim();
   }
 
-  function isRequiredFromLabel(labelEl) {
-    if (!labelEl) return false;
-    // Greenhouse often uses "*" for required fields
-    return /\*\s*$/.test(cleanText(labelEl.textContent));
-  }
-
-  function isFileUploadBlock(block) {
-    return !!block.querySelector('input[type="file"]');
-  }
-
-  function getBlockLabel(block) {
-    const labelEl = block.querySelector('label');
-    const label = cleanText(labelEl?.textContent || '');
-    return { label, labelEl };
-  }
-
   function reactSelectMetaFromShell(shell) {
     const isMulti = !!shell.querySelector('.select__multi-value');
     const single = shell.querySelector('.select__single-value');
@@ -462,141 +426,391 @@
     return { isMulti, hasSelection, selectedText, placeholderText };
   }
 
-  function findPrimaryControl(block) {
-    // Priority: react-select > native select > textarea > radios > checkboxes > text inputs
-    const shell = block.querySelector('.select-shell, [class*="select-shell"]');
-    if (shell) {
-      const input = shell.querySelector('input[role="combobox"], input.select__input');
-      return { kind: 'react-select', el: input || shell, shell };
-    }
+  // --- helpers ---
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-    const sel = block.querySelector('select');
-    if (sel) return { kind: 'select', el: sel };
-
-    const ta = block.querySelector('textarea');
-    if (ta) return { kind: 'textarea', el: ta };
-
-    const radios = block.querySelectorAll('input[type="radio"]');
-    if (radios && radios.length) return { kind: 'radio', el: radios[0] };
-
-    const checks = block.querySelectorAll('input[type="checkbox"]');
-    if (checks && checks.length) return { kind: 'checkbox', el: checks[0] };
-
-    const inp = block.querySelector('input[type="text"], input:not([type]), input[type="email"], input[type="tel"]');
-    if (inp) return { kind: 'input', el: inp };
-
-    return null;
+  function isVisible(el) {
+    if (!el) return false;
+    const rect = el.getBoundingClientRect();
+    return !!(rect.width && rect.height) && getComputedStyle(el).visibility !== "hidden";
   }
 
-  function isAnsweredControl(kind, el, block, shell) {
+  function getReactSelectRows(results) {
+    return (results || []).map((q, idx) => ({
+      label: q.label,
+      value: q.key || `${idx}|${q.label}`,
+      data: q,
+    }));
+  }
+
+  // Open a specific react-select and collect options via aria-controls
+  async function collectReactSelectOptionsFromShell(shell, { maxPreview = 30, timeoutMs = 1500, pollMs = 80 } = {}) {
     try {
-      if (kind === 'react-select') {
-        const meta = reactSelectMetaFromShell(shell);
-        return meta.hasSelection;
+      const input =
+        shell?.querySelector('input.select__input[role="combobox"]') ||
+        shell?.querySelector('input[role="combobox"]') ||
+        null;
+
+      if (!input) {
+        return { optionsCount: 0, optionsPreview: [], optionsHint: 'no-combobox-input' };
       }
 
-      if (kind === 'select') {
-        const v = (el.value || '').trim();
-        const txt = cleanText(el.selectedOptions?.[0]?.textContent || '');
-        if (!v) return false;
-        if (/select/i.test(txt)) return false;
-        return true;
-      }
+      // 打开 dropdown(pointer sequence 更稳定)
+      const control =
+        shell.querySelector('.select__control') ||
+        shell.querySelector('[class*="select__control"]') ||
+        shell;
 
-      if (kind === 'textarea' || kind === 'input') {
-        // prefer property value; fallback to attribute value
-        const v = (el.value ?? '').toString();
-        return v.trim().length > 0;
-      }
+      // focus
+      input.focus();
+      await new Promise(r => setTimeout(r, 30));
 
-      if (kind === 'radio') {
-        const name = el.name;
-        if (!name) return false;
-        return !!block.querySelector(`input[type="radio"][name="${CSS.escape(name)}"]:checked`);
-      }
+      // click (pointer events)
+      const rect = control.getBoundingClientRect();
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
 
-      if (kind === 'checkbox') {
-        const name = el.name;
-        if (name) {
-          return !!block.querySelector(`input[type="checkbox"][name="${CSS.escape(name)}"]:checked`);
+      ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(type => {
+        const e = new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          clientX: x,
+          clientY: y,
+          pointerId: 1,
+          pointerType: 'mouse',
+        });
+        control.dispatchEvent(e);
+      });
+
+      // 等待 options 出现(很多网站打开后异步渲染)
+      // React-Select may render menu as a portal to <body>, not inside shell
+      const start = Date.now();
+      let options = [];
+      let listbox = null;
+
+      while (Date.now() - start < timeoutMs) {
+        // Strategy 1: aria-controls points to listbox
+        const listboxId = input.getAttribute('aria-controls');
+        if (listboxId) {
+          listbox = document.getElementById(listboxId);
         }
-        // unnamed checkbox: treat checked as answered
-        return !!block.querySelector('input[type="checkbox"]:checked');
+        
+        // Strategy 2: menu inside shell
+        if (!listbox) {
+          listbox = shell.querySelector('[role="listbox"]') ||
+                    shell.querySelector('.select__menu');
+        }
+        
+        // Strategy 3: portal - find the most recently rendered menu in body
+        // (React-Select often portals to body for z-index reasons)
+        if (!listbox) {
+          const allMenus = document.querySelectorAll('.select__menu, [role="listbox"]');
+          for (const menu of allMenus) {
+            // Skip menus that are inside phone-input (country selector)
+            if (menu.closest('.phone-input, .iti')) continue;
+            // Check if menu is visible
+            const rect = menu.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+              listbox = menu;
+              break;
+            }
+          }
+        }
+
+        if (listbox) {
+          options = Array.from(
+            listbox.querySelectorAll('[role="option"], .select__option')
+          )
+            .map(o => (o.textContent || '').trim())
+            .filter(Boolean);
+        }
+
+        if (options.length > 0) break;
+        await new Promise(r => setTimeout(r, pollMs));
       }
+
+      // 一些 React-Select 会渲染 no-options notice
+      let hint = '';
+      const noOpt =
+        (listbox && listbox.querySelector('.select__menu-notice--no-options')) ||
+        (listbox && listbox.querySelector('[class*="menu-notice"]')) ||
+        null;
+      if (noOpt) hint = (noOpt.textContent || '').trim();
+
+      // 去重 + 截断 preview
+      const uniq = [];
+      const seen = new Set();
+      for (const t of options) {
+        const k = t.toLowerCase();
+        if (seen.has(k)) continue;
+        seen.add(k);
+        uniq.push(t);
+        if (uniq.length >= maxPreview) break;
+      }
+
+      // 关闭 dropdown
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      document.body.click();
+
+      return {
+        optionsCount: options.length,
+        optionsPreview: uniq,
+        optionsHint: hint || (options.length ? 'ok' : 'no-options'),
+        optionsListboxId: listbox?.id || null,
+      };
     } catch (e) {
-      // ignore
+      return { optionsCount: 0, optionsPreview: [], optionsHint: `error:${String(e?.message || e)}` };
     }
-    return false;
   }
 
-  /**
-   * Scan unanswered questions on the current application form.
-   * Returns an array of question descriptors:
-   * { label, kind, required, id, name, placeholder, selectedText, isMulti }
-   */
-  function scanUnansweredQuestions() {
-    const root = document.querySelector('#application_form') || document;
-    // Greenhouse typical blocks are ".field" but some sites use ".question"
-    const blocks = Array.from(root.querySelectorAll('.field, .question, [class*="field"], [class*="question"]'));
-
+  // ==================== Scan Unanswered Questions ====================
+  // Strategy: directly iterate all control types (like fillReactSelectByLabel does)
+  // instead of relying on .field/.question block structure
+  
+  async function scanUnansweredQuestions({ includeOptions = true, maxOptionsPreview = 30, asReactSelectRows = true } = {}) {
     const results = [];
-    const seen = new Set();
-
-    for (const block of blocks) {
-      if (!block || !isVisibleElement(block)) continue;
-      if (isFileUploadBlock(block)) continue; // Phase 0: ignore uploads
-
-      const { label, labelEl } = getBlockLabel(block);
-      if (!label) continue;
-
-      const ctrl = findPrimaryControl(block);
-      if (!ctrl) continue;
-
-      const { kind, el, shell } = ctrl;
-
-      // Build a stable-ish key to dedupe
-      const id = (el && el.id) ? el.id : '';
-      const name = (el && el.name) ? el.name : '';
-      const key = `${kind}|${id}|${name}|${label}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-
-      const required =
-        isRequiredFromLabel(labelEl) ||
-        (el && el.getAttribute && el.getAttribute('aria-required') === 'true') ||
-        (el && el.required === true);
-
-      const answered = isAnsweredControl(kind, el, block, shell);
-      if (answered) continue;
-
-      // optional metadata
-      let placeholder = '';
-      let selectedText = [];
-      let isMulti = false;
-
-      if (kind === 'react-select') {
-        const meta = reactSelectMetaFromShell(shell);
-        placeholder = meta.placeholderText || '';
-        selectedText = meta.selectedText || [];
-        isMulti = meta.isMulti;
-      } else if (kind === 'input' || kind === 'textarea') {
-        placeholder = cleanText(el.getAttribute?.('placeholder') || '');
+    const seenLabels = new Set();
+    
+    // Helper: check if label should be skipped (already handled by autofill)
+    const SKIP_LABELS = [
+      'first name', 'last name', 'email', 'phone', 'linkedin', 'github',
+      'resume', 'cover letter', 'country'
+    ];
+    function shouldSkipLabel(label) {
+      const l = (label || '').toLowerCase();
+      return SKIP_LABELS.some(skip => l.includes(skip));
+    }
+    
+    // Helper: extract clean label and check required
+    function processLabel(rawLabel) {
+      const label = (rawLabel || '').replace(/\*\s*$/, '').trim();
+      const required = (rawLabel || '').includes('*');
+      return { label, required };
+    }
+    
+    log(' Scanning unanswered questions...');
+    
+    // ========== 1. Scan all React-Select comboboxes ==========
+    const comboboxes = document.querySelectorAll('input.select__input[role="combobox"], input[role="combobox"]');
+    log(` Found ${comboboxes.length} combobox inputs`);
+    
+    for (const input of comboboxes) {
+      if (!isVisibleElement(input)) continue;
+      
+      // Get label using the proven method
+      const rawLabel = labelTextForInput(input);
+      if (!rawLabel) continue;
+      
+      const { label, required: requiredFromLabel } = processLabel(rawLabel);
+      if (!label || seenLabels.has(label.toLowerCase())) continue;
+      if (shouldSkipLabel(label)) continue;
+      
+      // Check if already answered
+      const shell = getReactSelectShellFromInput(input);
+      if (reactSelectHasAnySelectionFromShell(shell)) continue;
+      
+      seenLabels.add(label.toLowerCase());
+      
+      const required = requiredFromLabel || 
+                       input.getAttribute('aria-required') === 'true' ||
+                       input.required === true;
+      const isMulti = reactSelectLooksMulti(shell);
+      
+      // Collect options by opening the dropdown (the proven method)
+      let options = [];
+      if (includeOptions) {
+        const optMeta = await collectReactSelectOptionsFromShell(shell, {
+          maxPreview: maxOptionsPreview,
+        });
+        options = optMeta.optionsPreview || [];
       }
-
+      
       results.push({
         label,
-        kind,
+        kind: 'react-select',
         required,
-        id: id || null,
-        name: name || null,
-        placeholder: placeholder || null,
-        isMulti: kind === 'react-select' ? isMulti : null,
-        selectedText: kind === 'react-select' ? selectedText : null,
+        isMulti,
+        options,
+        optionsCount: options.length,
+        elementId: input.id || null,
+        elementName: input.name || null,
       });
+      
+      log(` [react-select] "${label}" - ${options.length} options`);
     }
-
-    return results;
+    
+    // ========== 2. Scan all textareas (main target for AI answers) ==========
+    const textareas = document.querySelectorAll('textarea');
+    log(` Found ${textareas.length} textareas`);
+    
+    for (const ta of textareas) {
+      if (!isVisibleElement(ta)) continue;
+      if (ta.value && ta.value.trim()) continue; // Already filled
+      
+      const rawLabel = labelTextForInput(ta);
+      if (!rawLabel) continue;
+      
+      const { label, required: requiredFromLabel } = processLabel(rawLabel);
+      if (!label || seenLabels.has(label.toLowerCase())) continue;
+      if (shouldSkipLabel(label)) continue;
+      
+      seenLabels.add(label.toLowerCase());
+      
+      const required = requiredFromLabel ||
+                       ta.getAttribute('aria-required') === 'true' ||
+                       ta.required === true;
+      
+      results.push({
+        label,
+        kind: 'textarea',
+        required,
+        placeholder: ta.placeholder || null,
+        elementId: ta.id || null,
+        elementName: ta.name || null,
+      });
+      
+      log(` [textarea] "${label}"`);
+    }
+    
+    // ========== 3. Scan native <select> elements ==========
+    const selects = document.querySelectorAll('select');
+    log(` Found ${selects.length} native selects`);
+    
+    for (const sel of selects) {
+      if (!isVisibleElement(sel)) continue;
+      if (!isFieldEmpty(sel)) continue;
+      
+      const rawLabel = labelTextForInput(sel);
+      if (!rawLabel) continue;
+      
+      const { label, required: requiredFromLabel } = processLabel(rawLabel);
+      if (!label || seenLabels.has(label.toLowerCase())) continue;
+      if (shouldSkipLabel(label)) continue;
+      
+      seenLabels.add(label.toLowerCase());
+      
+      const required = requiredFromLabel ||
+                       sel.getAttribute('aria-required') === 'true' ||
+                       sel.required === true;
+      
+      // Collect options from native select
+      const options = Array.from(sel.options)
+        .map(o => o.text.trim())
+        .filter(t => t && !/^(select|choose|--|please)/i.test(t))
+        .slice(0, maxOptionsPreview);
+      
+      results.push({
+        label,
+        kind: 'select',
+        required,
+        options,
+        optionsCount: options.length,
+        elementId: sel.id || null,
+        elementName: sel.name || null,
+      });
+      
+      log(` [select] "${label}" - ${options.length} options`);
+    }
+    
+    // ========== 4. Scan text inputs (excluding react-select internal inputs) ==========
+    const textInputs = document.querySelectorAll(
+      'input[type="text"], input[type="url"], input:not([type])'
+    );
+    log(` Found ${textInputs.length} text inputs`);
+    
+    for (const inp of textInputs) {
+      // Skip react-select internal inputs
+      if (inp.classList.contains('select__input')) continue;
+      if (inp.getAttribute('role') === 'combobox') continue;
+      
+      if (!isVisibleElement(inp)) continue;
+      if (inp.value && inp.value.trim()) continue;
+      
+      const rawLabel = labelTextForInput(inp);
+      if (!rawLabel) continue;
+      
+      const { label, required: requiredFromLabel } = processLabel(rawLabel);
+      if (!label || seenLabels.has(label.toLowerCase())) continue;
+      if (shouldSkipLabel(label)) continue;
+      
+      seenLabels.add(label.toLowerCase());
+      
+      const required = requiredFromLabel ||
+                       inp.getAttribute('aria-required') === 'true' ||
+                       inp.required === true;
+      
+      results.push({
+        label,
+        kind: 'input',
+        inputType: inp.type || 'text',
+        required,
+        placeholder: inp.placeholder || null,
+        elementId: inp.id || null,
+        elementName: inp.name || null,
+      });
+      
+      log(` [input] "${label}"`);
+    }
+    
+    // ========== 5. Scan radio groups ==========
+    const radioGroups = new Map(); // name -> first radio element
+    const radios = document.querySelectorAll('input[type="radio"]');
+    
+    for (const radio of radios) {
+      if (!radio.name) continue;
+      if (radioGroups.has(radio.name)) continue;
+      radioGroups.set(radio.name, radio);
+    }
+    
+    for (const [name, radio] of radioGroups) {
+      // Check if any option in group is selected
+      const group = document.querySelectorAll(`input[type="radio"][name="${CSS.escape(name)}"]`);
+      const isAnswered = Array.from(group).some(r => r.checked);
+      if (isAnswered) continue;
+      
+      if (!isVisibleElement(radio)) continue;
+      
+      const rawLabel = labelTextForInput(radio);
+      if (!rawLabel) continue;
+      
+      const { label, required: requiredFromLabel } = processLabel(rawLabel);
+      if (!label || seenLabels.has(label.toLowerCase())) continue;
+      if (shouldSkipLabel(label)) continue;
+      
+      seenLabels.add(label.toLowerCase());
+      
+      // Collect radio options
+      const options = [];
+      for (const r of group) {
+        const optLabel = r.labels?.[0]?.textContent?.trim() ||
+                         document.querySelector(`label[for="${CSS.escape(r.id)}"]`)?.textContent?.trim() ||
+                         r.value;
+        if (optLabel) options.push(optLabel);
+      }
+      
+      const required = requiredFromLabel ||
+                       radio.getAttribute('aria-required') === 'true' ||
+                       radio.required === true;
+      
+      results.push({
+        label,
+        kind: 'radio',
+        required,
+        options: options.slice(0, maxOptionsPreview),
+        optionsCount: options.length,
+        groupName: name,
+      });
+      
+      log(` [radio] "${label}" - ${options.length} options`);
+    }
+    
+    log(` Scan complete: ${results.length} unanswered questions found`);
+    
+    if (!asReactSelectRows) return results;
+    return getReactSelectRows(results);
   }
+
 
   function matchesAnyKeyword(labelText, keywords) {
     const t = (labelText || '').toLowerCase();
@@ -702,8 +916,7 @@
 
   
   /**
-   * Fill a React Select (combobox) field by label text
-   * Two modes:
+   * Fill a React Select (combobox) field by label text. Two modes:
    * - Search mode (typeToSearch=true): Type value, wait for results, click best match
    * - Select mode (typeToSearch=false): Open dropdown, find best match in options, click it
    */
@@ -1031,10 +1244,8 @@
 
   // ==================== Phone Input Handler ====================
   
-  /**
-   * Fill phone input with country code selection
-   * Greenhouse uses intl-tel-input library for phone, not React Select
-   */
+  // Fill phone input with country code selection
+  // Greenhouse uses intl-tel-input library for phone, not React Select
   async function fillPhoneWithCountry(phoneValue) {
     if (!phoneValue) return false;
     
@@ -1255,8 +1466,6 @@
   }
 
   // ============== Greenhouse React-Select Helpers ==================
-  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
   function normText(s) {
     return (s || '')
       .toLowerCase()
@@ -1275,23 +1484,6 @@
     return new RegExp(`\\b${escapeRegExp(w)}\\b`, 'i').test(text);
   }
 
-  function normalizeToken(s) {
-    return (s || "").toLowerCase().trim();
-  }
-
-  function hasReactInternals(node) {
-    if (!node) return false;
-
-    // React 18/17 常见：__reactFiber$xxxx / __reactContainer$xxxx / __reactProps$xxxx
-    const names = Object.getOwnPropertyNames(node);
-    return names.some(k =>
-      k.startsWith('__reactFiber$') ||
-      k.startsWith('__reactContainer$') ||
-      k.startsWith('__reactProps$') ||
-      k.startsWith('__reactEvents$')
-    );
-  }
-
   async function waitForDomStable(root, { timeoutMs = 12000, stableMs = 700, pollMs = 200 } = {}) {
     const start = Date.now();
     let lastMutation = Date.now();
@@ -1303,7 +1495,7 @@
     } catch (_) {}
 
     while (Date.now() - start < timeoutMs) {
-      // “Stable” means: no mutations for stableMs
+      // "Stable" means: no mutations for stableMs
       if (Date.now() - lastMutation >= stableMs) {
         observer && observer.disconnect();
         return true;
@@ -1424,10 +1616,27 @@
   }
 
   function genderCandidates(genderValue) {
-    const g = (genderValue || '').toLowerCase().trim();
+    // Accept: "Male" (string), {label,value}, or accidental [gender]
+    const raw = (() => {
+      if (Array.isArray(genderValue)) {
+        const v0 = genderValue[0];
+        if (typeof v0 === 'string') return v0;
+        if (v0 && typeof v0 === 'object') return v0.value ?? v0.label ?? '';
+        return v0 ?? '';
+      }
+      if (typeof genderValue === 'string') return genderValue;
+      if (genderValue && typeof genderValue === 'object') return genderValue.value ?? genderValue.label ?? '';
+      if (genderValue == null) return '';
+      return String(genderValue);
+    })();
+
+    const g = raw.toLowerCase().trim();
     if (!g) return [];
 
-    // Normalize common values from your side panel
+    if (g.includes('prefer') && g.includes('not')) {
+      return ['prefer not to say', "i don't wish to answer", 'decline to answer', raw];
+    }
+
     if (g === 'male' || g === 'man') {
       return ['cisgender male', 'cis male', 'male', 'man'];
     }
@@ -1441,13 +1650,12 @@
     }
 
     if (g.includes('trans')) {
-      // best-effort; different companies label this differently
-      return ['transgender', 'trans', genderValue];
+      return ['transgender', 'trans', raw];
     }
 
-    // fallback: try the raw value first
-    return [genderValue];
+    return [raw];
   }
+
   function getReactSelectShellFromInput(inputEl) {
     return inputEl.closest('.select-shell, [class*="select-shell"]')
         || inputEl.closest('.select__container')
@@ -1604,7 +1812,7 @@
       const labelText = labelEl?.textContent || '';
       if (!looksLikeStateProvinceQuestion(labelText)) continue;
 
-      // 如果已经选过，Greenhouse 会显示 .select__single-value
+      // 如果已经选过,Greenhouse 会显示 .select__single-value
       const hasSelectedValue = Boolean(input.closest('.select__value-container')?.querySelector('.select__single-value'));
       if (hasSelectedValue) return false;
 
@@ -1737,7 +1945,7 @@
     );
     if (hasSelected) return false;
 
-    return await selectReactSelectValue(input, genderCandidates([gender]));
+    return await selectReactSelectValue(input, genderCandidates(gender));
   }
 
     async function fillRaceEthnicityAll(userData) {
@@ -1863,7 +2071,7 @@
     }
 
     // Strategy 2: Greenhouse react-select (combobox)
-    // Note: this is async, but we can “fire and forget” if you keep function sync,
+    // Note: this is async, but we can "fire and forget" if you keep function sync,
     // OR (better) make the caller await it. I recommend the await approach below.
     return false;
   }
@@ -1973,11 +2181,27 @@
     const fileInputs = document.querySelectorAll('input[type="file"]');
     log(` Found ${fileInputs.length} file input(s)`);
     
-    // Find the resume file input by walking up the DOM
+    // First pass: check if resume is already uploaded
+    for (const input of fileInputs) {
+      if (input.files && input.files.length > 0) {
+        // Check if this is a resume input
+        let parent = input.parentElement;
+        for (let depth = 0; depth < 10 && parent; depth++) {
+          const parentText = (parent.textContent || '').toLowerCase();
+          if ((parentText.includes('resume') || parentText.includes('cv')) && 
+              !parentText.includes('cover letter')) {
+            log(' Resume already uploaded, returning true');
+            return true;  // File already there = success
+          }
+          parent = parent.parentElement;
+        }
+      }
+    }
+    
+    // Second pass: find and upload to resume input
     for (const input of fileInputs) {
       // Skip if already has file
       if (input.files && input.files.length > 0) {
-        log(' Input already has file, skipping');
         continue;
       }
       
@@ -2052,7 +2276,22 @@
     
     const fileInputs = document.querySelectorAll('input[type="file"]');
     
-    // Find the cover letter file input by walking up the DOM
+    // First pass: check if cover letter is already uploaded
+    for (const input of fileInputs) {
+      if (input.files && input.files.length > 0) {
+        let parent = input.parentElement;
+        for (let depth = 0; depth < 10 && parent; depth++) {
+          const parentText = (parent.textContent || '').toLowerCase();
+          if (parentText.includes('cover letter') || parentText.includes('cover_letter')) {
+            log(' Cover letter already uploaded, returning true');
+            return true;  // File already there = success
+          }
+          parent = parent.parentElement;
+        }
+      }
+    }
+    
+    // Second pass: find and upload to cover letter input
     for (const input of fileInputs) {
       if (input.files && input.files.length > 0) {
         continue;
@@ -2208,205 +2447,33 @@
     
     // Upload documents (won't re-upload if already uploaded)
     if (resumeData) {
-      results.resumeUploaded = await uploadResume(resumeData);
+      const uploaded = await uploadResume(resumeData);
+      if (uploaded) __resumeUploadedOnce = true;
     }
     if (coverLetterData) {
-      results.coverLetterUploaded = await uploadCoverLetter(coverLetterData);
+      const uploaded = await uploadCoverLetter(coverLetterData);
+      if (uploaded) __coverLetterUploadedOnce = true;
     }
+    
+    // Use global state - once true, stays true across retries
+    results.resumeUploaded = __resumeUploadedOnce;
+    results.coverLetterUploaded = __coverLetterUploadedOnce;
+    log(` Resume uploaded: ${results.resumeUploaded}, Cover letter uploaded: ${results.coverLetterUploaded}`);
+
+    const unanswered = await scanUnansweredQuestions({
+      includeOptions: true,      // 会尝试打开 react-select 下拉并抓 optionsPreview
+      maxOptionsPreview: 30,
+      asReactSelectRows: true,   // 让 react-select 返回带 shell 的 row（可用于后续 fill）
+    });
+
+    results.skippedDetails = unanswered;              // 保留完整对象方便 debug
+    results.skipped = unanswered.map(q => q.label);   // 维持你 log 里 skipped: [...] 的期望
+    results.skippedRequired = unanswered
+      .filter(q => q.required)
+      .map(q => q.label);
     
     log(' Results:', results);
     return results;
-  }
-
-  function scanUnansweredQuestions({ root = document } = {}) {
-    const form =
-      root.querySelector?.('#application_form') ||
-      root.querySelector?.('form') ||
-      null;
-
-    if (!form) return [];
-
-    const out = [];
-    const seen = new Set();
-
-    const isInteractable = (el) => {
-      if (!el) return false;
-      if (!document.contains(el)) return false;
-      if (el.disabled) return false;
-
-      const style = window.getComputedStyle(el);
-      if (style.display === 'none' || style.visibility === 'hidden') return false;
-
-      const rect = el.getBoundingClientRect?.();
-      if (!rect || rect.width === 0 || rect.height === 0) return false;
-
-      return true;
-    };
-
-    const isRequired = (el) => {
-      if (!el) return false;
-      if (el.required) return true;
-      const ariaReq = el.getAttribute?.('aria-required');
-      if (ariaReq === 'true') return true;
-      // Greenhouse 常见 required 标记（尽量温和，不一定每站都准）
-      const field = el.closest?.('.field, .application-question, [data-test="question"]');
-      if (field && field.querySelector?.('.required, [aria-required="true"]')) return true;
-      return false;
-    };
-
-    const safeLabel = (el) => {
-      try {
-        // 你文件里已有 labelTextForInput（用于按 label 填 react select 等）:contentReference[oaicite:3]{index=3}
-        if (typeof labelTextForInput === 'function') {
-          const t = labelTextForInput(el);
-          if (t) return t;
-        }
-      } catch (_) {}
-      return (
-        el.getAttribute?.('aria-label') ||
-        el.getAttribute?.('placeholder') ||
-        el.name ||
-        el.id ||
-        'unknown'
-      );
-    };
-
-    const add = (item) => {
-      if (!item) return;
-      const key = item.key || `${item.kind}:${item.name || item.id || item.label}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      out.push({ ...item, key });
-    };
-
-    // 1) text-ish inputs + textarea
-    const textLike = form.querySelectorAll('input, textarea');
-    for (const el of textLike) {
-      if (!isInteractable(el)) continue;
-
-      const tag = el.tagName.toLowerCase();
-      const type = (el.getAttribute('type') || '').toLowerCase();
-
-      if (tag === 'input') {
-        if (['hidden', 'submit', 'button', 'reset', 'file', 'checkbox', 'radio'].includes(type)) continue;
-      }
-
-      // react-select 自己单独处理（它的 input.value 常常为空，但其实有选中项）
-      if (el.matches?.('input.select__input[role="combobox"]')) continue;
-
-      // 你文件里已有 isFieldEmpty()（你一直在用它避免覆盖用户输入）——有则复用，否则退化判断
-      const empty =
-        (typeof isFieldEmpty === 'function') ? isFieldEmpty(el) : !String(el.value || '').trim();
-
-      if (empty) {
-        add({
-          kind: tag === 'textarea' ? 'textarea' : 'input',
-          id: el.id || '',
-          name: el.name || '',
-          label: safeLabel(el),
-          required: isRequired(el),
-          selector: el.id ? `#${CSS.escape(el.id)}` : '',
-        });
-      }
-    }
-
-    // 2) native <select>
-    for (const el of form.querySelectorAll('select')) {
-      if (!isInteractable(el)) continue;
-      const v = el.value;
-      const empty = v == null || String(v).trim() === '';
-      if (empty) {
-        const opts = Array.from(el.options || [])
-          .map(o => (o?.textContent || '').trim())
-          .filter(Boolean)
-          .slice(0, 50);
-        add({
-          kind: 'select',
-          id: el.id || '',
-          name: el.name || '',
-          label: safeLabel(el),
-          required: isRequired(el),
-          options: opts,
-          selector: el.id ? `#${CSS.escape(el.id)}` : '',
-        });
-      }
-    }
-
-    // 3) react-select (Greenhouse 常见) —— 复用你已有的 reactSelectHasAnySelection :contentReference[oaicite:4]{index=4}
-    for (const el of form.querySelectorAll('input.select__input[role="combobox"]')) {
-      if (!isInteractable(el)) continue;
-
-      const hasSelection =
-        (typeof reactSelectHasAnySelection === 'function')
-          ? reactSelectHasAnySelection(el)
-          : !!el.closest?.('.select__control')?.querySelector?.('.select__single-value,.select__multi-value');
-
-      if (!hasSelection) {
-        add({
-          kind: 'react-select',
-          id: el.id || '',
-          name: el.name || '',
-          label: safeLabel(el),
-          required: isRequired(el),
-        });
-      }
-    }
-
-    // 4) radio groups
-    const radios = Array.from(form.querySelectorAll('input[type="radio"]')).filter(isInteractable);
-    const byName = new Map();
-    for (const r of radios) {
-      const n = r.name || r.getAttribute('name') || '';
-      if (!n) continue;
-      if (!byName.has(n)) byName.set(n, []);
-      byName.get(n).push(r);
-    }
-    for (const [name, group] of byName.entries()) {
-      const anyChecked = group.some(r => r.checked);
-      if (anyChecked) continue;
-
-      const first = group[0];
-      const fieldset = first.closest?.('fieldset');
-      const legend = fieldset?.querySelector?.('legend')?.textContent?.trim();
-      const label = legend || safeLabel(first);
-
-      const options = group
-        .map(r => {
-          const id = r.id;
-          const l = id ? form.querySelector(`label[for="${CSS.escape(id)}"]`) : null;
-          return (l?.textContent || '').trim();
-        })
-        .filter(Boolean)
-        .slice(0, 50);
-
-      // 只有当它“看起来像 required”时才列为 unanswered（否则很多站点 radio 是可选的）
-      const required = group.some(isRequired);
-      if (required) {
-        add({ kind: 'radio', name, label, required: true, options });
-      }
-    }
-
-    // 5) checkbox groups（同样只在 required 时列出来，避免噪音）
-    const cbs = Array.from(form.querySelectorAll('input[type="checkbox"]')).filter(isInteractable);
-    const cbByName = new Map();
-    for (const c of cbs) {
-      const n = c.name || c.getAttribute('name') || '';
-      if (!n) continue;
-      if (!cbByName.has(n)) cbByName.set(n, []);
-      cbByName.get(n).push(c);
-    }
-    for (const [name, group] of cbByName.entries()) {
-      const anyChecked = group.some(c => c.checked);
-      if (anyChecked) continue;
-
-      const required = group.some(isRequired);
-      if (!required) continue;
-
-      const first = group[0];
-      add({ kind: 'checkbox', name, label: safeLabel(first), required: true });
-    }
-
-    return out;
   }
 
   // Expose for AutoRun / debug (scope-safe)
@@ -2427,23 +2494,34 @@
 
   function installPageDebugBridge() {
     // 1) Content script listens to page messages
-    window.addEventListener('message', (ev) => {
+    window.addEventListener('message', async (ev) => {
       const msg = ev.data;
       if (!msg || msg.source !== 'JOB_AUTOFILL_PAGE') return;
 
       if (msg.type === 'SCAN_UNANSWERED') {
-        let payload = [];
-        try {
-          payload = scanUnansweredQuestions();
-        } catch (e) {
-          payload = { error: String(e?.message || e) };
-        }
-        window.postMessage({
-          source: 'JOB_AUTOFILL_CONTENT',
-          type: 'SCAN_UNANSWERED_RESULT',
-          requestId: msg.requestId,
-          payload
-        }, '*');
+        const includeOptions = msg.includeOptions ?? true;
+        const maxOptionsPreview = msg.maxOptionsPreview ?? 30;
+        const asReactSelectRows = msg.asReactSelectRows ?? true;
+
+        scanUnansweredQuestions({ includeOptions, maxOptionsPreview, asReactSelectRows })
+          .then(unanswered => {
+            // Reply back to page context via postMessage
+            window.postMessage({
+              source: 'JOB_AUTOFILL_CONTENT',
+              type: 'SCAN_UNANSWERED_RESULT',
+              ok: true,
+              unanswered,
+              count: unanswered.length
+            }, '*');
+          })
+          .catch(err => {
+            window.postMessage({
+              source: 'JOB_AUTOFILL_CONTENT',
+              type: 'SCAN_UNANSWERED_RESULT',
+              ok: false,
+              error: String(err)
+            }, '*');
+          });
       }
     });
 
@@ -2467,7 +2545,6 @@
 
 
   // ==================== Message Listener ====================
-
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     switch (message.type) {
       case 'DETECT_FORM':
@@ -2488,9 +2565,18 @@
         break;
       
       case 'SCAN_UNANSWERED': {
-        const unanswered = scanUnansweredQuestions();
-        sendResponse({ count: unanswered.length, unanswered });
-        break;
+        (async () => {
+          const payload = message.payload || {};
+          const unanswered = await scanUnansweredQuestions({
+            includeOptions: payload.includeOptions ?? true,
+            maxOptionsPreview: payload.maxOptionsPreview ?? 30,
+            asReactSelectRows: payload.asReactSelectRows ?? true,
+          });
+          sendResponse({ ok: true, count: unanswered.length, unanswered });
+        })().catch(e => {
+          sendResponse({ ok: false, error: String(e?.message || e), stack: e?.stack });
+        });
+        return true;
       }
 
       default:
@@ -2502,7 +2588,7 @@
 
   const formType = detectFormType();
   if (formType.detected) {
-    setTimeout(showNotificationBanner('supported'), 500);
+    setTimeout(() => updateNotificationBanner('supported'), 500);
   }
 
   chrome.runtime.sendMessage({ type: 'CONTENT_SCRIPT_READY', url: window.location.href });
@@ -2602,7 +2688,7 @@ async function autoRunIfEnabled() {
     const { autoFillEnabled = true, userData, resumeData, coverLetterData } =
       await chrome.storage.local.get(['autoFillEnabled', 'userData', 'resumeData', 'coverLetterData']);
 
-    // 只有明确设置为 false 才禁用；undefined 视为开启（兼容旧数据）
+    // 只有明确设置为 false 才禁用;undefined 视为开启(兼容旧数据)
     if (autoFillEnabled === false) return;
     if (!userData) return;
 
@@ -2610,7 +2696,7 @@ async function autoRunIfEnabled() {
     if (!ready) return;
     updateNotificationBanner('running');
 
-    // Greenhouse React hydration guard (prevents “filled then erased” + hydration errors)
+    // Greenhouse React hydration guard (prevents "filled then erased" + hydration errors)
     if (isGreenhouseApplicationPage()) {
       const ok = await waitForGreenhouseHydration({ timeoutMs: 20000, stableMs: 1000, pollMs: 200 });
       if (!ok) {
@@ -2631,7 +2717,14 @@ async function autoRunIfEnabled() {
 
     const filledCount = Array.isArray(result?.filled) ? result.filled.length : 0;
     const resumeOk = !!result?.resumeUploaded;
-    const unanswered = window.__JOB_AUTOFILL__?.scanUnansweredQuestions?.() || [];
+    let unanswered = [];
+    try {
+      // Auto-run 时建议 includeOptions:false(不去开 dropdown,避免闪烁/变慢)
+      unanswered = await scanUnansweredQuestions({ includeOptions: false });
+    } catch (e) {
+      unanswered = [];
+    }
+
     await chrome.storage.local.set({
       lastUnanswered: { url: location.href, ts: Date.now(), unanswered }
     });
