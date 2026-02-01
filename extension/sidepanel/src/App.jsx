@@ -217,13 +217,16 @@ function App() {
   const [status, setStatus] = useState({ type: '', message: '' })
   const [formType, setFormType] = useState(null)
   const [saveStatus, setSaveStatus] = useState({})
+  const [aiEnabled, setAiEnabled] = useState(true)
 
   // Load saved data on mount
   useEffect(() => {
-    storage.get(['userData', 'resumeData', 'coverLetterData']).then((result) => {
+    storage.get(['userData', 'resumeData', 'coverLetterData', 'aiEnabled']).then((result) => {
       if (result.userData) setFormData(prev => ({ ...prev, ...result.userData }))
       if (result.resumeData) setResumeData(result.resumeData)
       if (result.coverLetterData) setCoverLetterData(result.coverLetterData)
+      // AI is enabled by default (true), only disable if explicitly set to false
+      if (result.aiEnabled === false) setAiEnabled(false)
     })
     
     sendMessage({ type: 'DETECT_FORM' }).then((result) => {
@@ -398,6 +401,27 @@ function App() {
           <Zap size={18} />
           Fill Application
         </button>
+        
+        {/* AI Toggle */}
+        <div className="mt-3 flex items-center justify-between">
+          <span className="text-sm text-gray-600">AI answers custom questions</span>
+          <button
+            onClick={() => {
+              const newValue = !aiEnabled
+              setAiEnabled(newValue)
+              storage.set({ aiEnabled: newValue })
+            }}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+              aiEnabled ? 'bg-blue-600' : 'bg-gray-300'
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                aiEnabled ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}

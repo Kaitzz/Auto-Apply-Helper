@@ -1,9 +1,199 @@
 // Background Service Worker
-// Handles side panel, message passing, and page detection
+// Handles side panel, message passing, page detection, and AI integration
 
 // ==================== Configuration ====================
-const DEBUG = false;
+const DEBUG = true;
 const log = (...args) => { if (DEBUG) console.log('[Background]', ...args); };
+
+// Claude API configuration
+const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
+const CLAUDE_MODEL = 'claude-sonnet-4-20250514';
+
+// Load API key from config.local.js (gitignored)
+// To use: create config.local.js with: const CLAUDE_API_KEY_LOCAL = 'your-key';
+let CLAUDE_API_KEY = 'YOUR_API_KEY_HERE';
+try {
+  importScripts('config.local.js');
+  if (typeof CLAUDE_API_KEY_LOCAL !== 'undefined') {
+    CLAUDE_API_KEY = CLAUDE_API_KEY_LOCAL;
+    log('API key loaded from config.local.js');
+  }
+} catch (e) {
+  log('config.local.js not found, using placeholder. Create config.local.js with your API key.');
+}
+
+// ==================== Claude AI Service ====================
+
+/**
+ * Call Claude API to answer job application questions
+ * @param {Array} questions - Array of unanswered questions with options
+ * @param {Object} userContext - User data (profile, resume, etc.)
+ * @returns {Promise<Array>} - Array of {label, answer} pairs
+ */
+async function askClaudeForAnswers(questions, userContext) {
+  if (!CLAUDE_API_KEY || CLAUDE_API_KEY === 'YOUR_API_KEY_HERE') {
+    throw new Error('Claude API key not configured. Please set CLAUDE_API_KEY in background.js');
+  }
+
+  // Build the prompt
+  const systemPrompt = buildSystemPrompt(userContext);
+  const userPrompt = buildUserPrompt(questions);
+
+  log('Calling Claude API with', questions.length, 'questions');
+
+  try {
+    const response = await fetch(CLAUDE_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': CLAUDE_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: CLAUDE_MODEL,
+        max_tokens: 4096,
+        system: systemPrompt,
+        messages: [
+          { role: 'user', content: userPrompt }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Claude API error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    const content = data.content?.[0]?.text || '';
+    
+    log('Claude response received, parsing...');
+    
+    // Parse the JSON response
+    const answers = parseClaudeResponse(content, questions);
+    return answers;
+
+  } catch (error) {
+    log('Claude API error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Build system prompt with user context
+ */
+function buildSystemPrompt(userContext) {
+  const { userData, resumeText } = userContext;
+  
+  return `You are an AI assistant helping a job applicant fill out job application forms.
+
+## Applicant Profile:
+- Name: ${userData?.first_name || ''} ${userData?.last_name || ''}
+- Email: ${userData?.email || ''}
+- Phone: ${userData?.phone || ''}
+- Location: ${userData?.city || ''}, ${userData?.state || ''}
+- Current Company: ${userData?.current_company || 'Not specified'}
+- LinkedIn: ${userData?.linkedin || ''}
+- GitHub: ${userData?.github || ''}
+- Website: ${userData?.website || ''}
+
+## Education:
+- School: ${userData?.school || ''}
+- Degree: ${userData?.degree || ''}
+- Major: ${userData?.discipline || ''}
+- Graduation: ${userData?.edu_end_year || ''}
+
+## Work Authorization:
+- Authorized to work: ${userData?.authorized_to_work || 'Yes'}
+- Needs sponsorship: ${userData?.needs_sponsorship ? 'Yes' : 'No'}
+
+## EEO Information (if provided):
+- Gender: ${userData?.gender || 'Prefer not to say'}
+- Race/Ethnicity: ${userData?.race_ethnicity || 'Prefer not to say'}
+- Veteran Status: ${userData?.veteran_status || 'Prefer not to say'}
+- Disability Status: ${userData?.disability_status || 'Prefer not to say'}
+
+${resumeText ? `## Resume Content:\n${resumeText}` : ''}
+
+## Your Task:
+Answer job application questions based on the applicant's profile. 
+- For multiple choice questions, select the EXACT option text from the provided options
+- For text questions, write professional, concise answers
+- If information is not available, make reasonable assumptions or use "Prefer not to say" for sensitive questions
+- Keep answers authentic and relevant to the applicant's background
+
+IMPORTANT: Respond ONLY with a valid JSON array, no other text.`;
+}
+
+/**
+ * Build user prompt with questions
+ */
+function buildUserPrompt(questions) {
+  const questionList = questions.map((q, i) => {
+    let questionText = `${i + 1}. "${q.label}" (${q.kind}${q.required ? ', REQUIRED' : ''})`;
+    
+    if (q.options && q.options.length > 0) {
+      questionText += `\n   Options: ${JSON.stringify(q.options)}`;
+    }
+    
+    if (q.placeholder) {
+      questionText += `\n   Placeholder: "${q.placeholder}"`;
+    }
+    
+    return questionText;
+  }).join('\n\n');
+
+  return `Please answer the following job application questions:
+
+${questionList}
+
+Respond with a JSON array in this exact format:
+[
+  {"label": "Question label here", "answer": "Your answer here"},
+  ...
+]
+
+For multiple choice questions, the answer MUST be one of the exact option texts provided.
+For text questions, provide a professional and relevant answer.`;
+}
+
+/**
+ * Parse Claude's response into structured answers
+ */
+function parseClaudeResponse(content, questions) {
+  try {
+    // Try to extract JSON from the response
+    const jsonMatch = content.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) {
+      log('Could not find JSON array in response:', content);
+      return [];
+    }
+
+    const answers = JSON.parse(jsonMatch[0]);
+    
+    // Validate and map answers to questions
+    return answers.map(a => ({
+      label: a.label,
+      answer: a.answer
+    }));
+
+  } catch (error) {
+    log('Error parsing Claude response:', error, content);
+    return [];
+  }
+}
+
+/**
+ * Extract text from resume PDF (base64)
+ */
+async function extractResumeText(resumeData) {
+  if (!resumeData?.content) return '';
+  
+  // For now, just return a placeholder - PDF text extraction would need a library
+  // In production, you might use pdf.js or send to a backend service
+  return `[Resume: ${resumeData.filename || 'uploaded'}]`;
+}
 
 // Other job board patterns (for future support)
 const JOB_BOARD_PATTERNS = [
@@ -167,11 +357,65 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'CONTENT_SCRIPT_READY':
       log('Content script ready on:', message.url);
       break;
+    
+    case 'ANSWER_QUESTIONS':
+      // AI-powered question answering
+      handleAnswerQuestions(message.questions, sender.tab?.id)
+        .then(answers => sendResponse({ success: true, answers }))
+        .catch(error => sendResponse({ success: false, error: error.message }));
+      return true; // async response
+    
+    case 'SAVE_API_KEY':
+      chrome.storage.local.set({ claudeApiKey: message.apiKey }, () => {
+        sendResponse({ success: true });
+      });
+      return true;
+    
+    case 'GET_API_KEY_STATUS':
+      chrome.storage.local.get(['claudeApiKey'], (result) => {
+        sendResponse({ hasKey: !!result.claudeApiKey });
+      });
+      return true;
       
     default:
       log('Unknown message type:', message.type);
   }
 });
+
+/**
+ * Handle AI question answering request from content script
+ */
+async function handleAnswerQuestions(questions, tabId) {
+  if (!questions || questions.length === 0) {
+    return [];
+  }
+
+  log(`Processing ${questions.length} questions for tab ${tabId}`);
+
+  // Get user data from storage
+  const { userData, resumeData, coverLetterData } = await chrome.storage.local.get([
+    'userData', 
+    'resumeData', 
+    'coverLetterData'
+  ]);
+
+  // Extract text from resume if available
+  const resumeText = await extractResumeText(resumeData);
+
+  // Build context for Claude
+  const userContext = {
+    userData: userData || {},
+    resumeText,
+    coverLetterData
+  };
+
+  // Call Claude API
+  const answers = await askClaudeForAnswers(questions, userContext);
+  
+  log(`Received ${answers.length} answers from Claude`);
+  
+  return answers;
+}
 
 // Initialize on install
 chrome.runtime.onInstalled.addListener(() => {

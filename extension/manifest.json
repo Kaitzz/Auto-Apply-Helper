@@ -14,7 +14,8 @@
   "host_permissions": [
     "https://boards.greenhouse.io/*",
     "https://job-boards.greenhouse.io/*",
-    "https://*.greenhouse.io/*"
+    "https://*.greenhouse.io/*",
+    "https://api.anthropic.com/*"
   ],
   
   "action": {

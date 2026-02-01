@@ -811,6 +811,421 @@
     return getReactSelectRows(results);
   }
 
+  // ==================== Fill Answer from AI ====================
+  /**
+   * Fill a single question with an AI-generated answer
+   * @param {Object} questionData - Question object from scanUnansweredQuestions
+   * @param {string} answer - The answer from AI
+   * @returns {Promise<boolean>} - Whether the fill succeeded
+   */
+  async function fillAnswer(questionData, answer) {
+    if (!answer || !questionData) return false;
+    
+    const { kind, label, elementId, elementName, groupName, options } = questionData;
+    log(` Filling answer for "${label}" (${kind}): "${answer}"`);
+    
+    try {
+      switch (kind) {
+        case 'react-select':
+          return await fillReactSelectAnswer(questionData, answer);
+          
+        case 'textarea':
+          return fillTextareaAnswer(questionData, answer);
+          
+        case 'select':
+          return fillNativeSelectAnswer(questionData, answer);
+          
+        case 'input':
+          return fillInputAnswer(questionData, answer);
+          
+        case 'radio':
+          return fillRadioAnswer(questionData, answer);
+          
+        case 'checkbox':
+          return fillCheckboxAnswer(questionData, answer);
+          
+        default:
+          log(` Unknown question kind: ${kind}`);
+          return false;
+      }
+    } catch (e) {
+      log(` Error filling ${kind} question "${label}":`, e);
+      return false;
+    }
+  }
+  
+  /**
+   * Fill a React-Select dropdown with the given answer
+   * Uses the proven selectReactSelectValue approach
+   */
+  async function fillReactSelectAnswer(questionData, answer) {
+    const { label, elementId } = questionData;
+    
+    log(` [AI Fill] React-Select "${label}" with answer "${answer}"`);
+    
+    // CRITICAL: Close ALL open dropdowns first
+    document.activeElement?.blur();
+    document.body.click();
+    await sleep(200);
+    
+    // Find the input by elementId or by label text
+    let input = null;
+    
+    if (elementId) {
+      input = document.getElementById(elementId);
+    }
+    
+    if (!input) {
+      // Search by label - find the EXACT label first
+      const labels = document.querySelectorAll('label');
+      for (const lab of labels) {
+        const labText = (lab.textContent || '').replace(/\*\s*$/, '').trim();
+        // Check for exact or close match
+        if (labText.toLowerCase() === label.toLowerCase() ||
+            labText.toLowerCase().includes(label.toLowerCase()) ||
+            label.toLowerCase().includes(labText.toLowerCase())) {
+          
+          const selectContainer = lab.parentElement;
+          const selectShell = selectContainer?.querySelector('.select-shell, [class*="select-shell"]');
+          
+          if (selectShell) {
+            input = selectShell.querySelector('input.select__input, input[role="combobox"]');
+            if (input) {
+              log(` Found input via label: "${labText.substring(0, 40)}"`);
+              break;
+            }
+          }
+        }
+      }
+    }
+    
+    if (!input) {
+      log(` Could not find React-Select input for "${label}"`);
+      return false;
+    }
+    
+    // Verify it's a react-select combobox
+    if (!isReactSelectComboboxInput(input)) {
+      log(` Input is not a React-Select combobox`);
+      return false;
+    }
+    
+    // Get the select shell for verification later
+    const selectShell = input.closest('.select-shell') || 
+                        input.closest('[class*="select-shell"]') ||
+                        input.closest('.select__container');
+    
+    // Check if already has a value
+    if (selectShell) {
+      const existingValue = selectShell.querySelector('.select__single-value');
+      if (existingValue && existingValue.textContent && !existingValue.textContent.includes('Select')) {
+        log(` Already has value: ${existingValue.textContent}`);
+        return true;
+      }
+    }
+    
+    // Use the proven selectReactSelectValue function with our answer as candidates
+    const candidates = [answer];
+    const success = await selectReactSelectValue(input, candidates);
+    
+    if (success) {
+      log(` ✓ Successfully selected "${answer}" for "${label}"`);
+      return true;
+    }
+    
+    // If exact match failed, try with the first few words
+    const shortAnswer = answer.split(' ').slice(0, 2).join(' ');
+    if (shortAnswer !== answer && shortAnswer.length >= 3) {
+      log(` Trying shorter match: "${shortAnswer}"`);
+      const shortSuccess = await selectReactSelectValue(input, [shortAnswer]);
+      if (shortSuccess) {
+        log(` ✓ Successfully selected via short match for "${label}"`);
+        return true;
+      }
+    }
+    
+    log(` Failed to select for "${label}"`);
+    return false;
+  }
+  
+  /**
+   * Fill a textarea with the given answer
+   */
+  function fillTextareaAnswer(questionData, answer) {
+    const { elementId, elementName, label } = questionData;
+    
+    // Find the textarea
+    let ta = null;
+    if (elementId) ta = document.getElementById(elementId);
+    if (!ta && elementName) ta = document.querySelector(`textarea[name="${CSS.escape(elementName)}"]`);
+    if (!ta) {
+      // Fallback: find by label text
+      const textareas = document.querySelectorAll('textarea');
+      for (const t of textareas) {
+        const tLabel = labelTextForInput(t);
+        if (tLabel && tLabel.toLowerCase().includes(label.toLowerCase())) {
+          ta = t;
+          break;
+        }
+      }
+    }
+    
+    if (!ta) {
+      log(` Could not find textarea for "${label}"`);
+      return false;
+    }
+    
+    // Fill it
+    ta.focus();
+    ta.value = answer;
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    ta.dispatchEvent(new Event('change', { bubbles: true }));
+    ta.blur();
+    
+    log(` ✓ Textarea "${label}" filled`);
+    return true;
+  }
+  
+  /**
+   * Fill a native <select> with the given answer
+   */
+  function fillNativeSelectAnswer(questionData, answer) {
+    const { elementId, elementName, label, options } = questionData;
+    
+    let sel = null;
+    if (elementId) sel = document.getElementById(elementId);
+    if (!sel && elementName) sel = document.querySelector(`select[name="${CSS.escape(elementName)}"]`);
+    
+    if (!sel) {
+      log(` Could not find select for "${label}"`);
+      return false;
+    }
+    
+    // Find best matching option
+    const answerLower = answer.toLowerCase();
+    let bestOption = null;
+    let bestScore = -1;
+    
+    for (const opt of sel.options) {
+      const optText = opt.text.toLowerCase();
+      // Exact match
+      if (optText === answerLower) {
+        bestOption = opt;
+        bestScore = 100;
+        break;
+      }
+      // Partial match
+      if (optText.includes(answerLower) || answerLower.includes(optText)) {
+        const score = Math.max(optText.length, answerLower.length);
+        if (score > bestScore) {
+          bestScore = score;
+          bestOption = opt;
+        }
+      }
+    }
+    
+    if (!bestOption) {
+      log(` No matching option found for "${answer}" in select "${label}"`);
+      return false;
+    }
+    
+    sel.value = bestOption.value;
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    
+    log(` ✓ Select "${label}" set to "${bestOption.text}"`);
+    return true;
+  }
+  
+  /**
+   * Fill a text input with the given answer
+   */
+  function fillInputAnswer(questionData, answer) {
+    const { elementId, elementName, label } = questionData;
+    
+    let inp = null;
+    if (elementId) inp = document.getElementById(elementId);
+    if (!inp && elementName) inp = document.querySelector(`input[name="${CSS.escape(elementName)}"]`);
+    
+    if (!inp) {
+      log(` Could not find input for "${label}"`);
+      return false;
+    }
+    
+    inp.focus();
+    inp.value = answer;
+    inp.dispatchEvent(new Event('input', { bubbles: true }));
+    inp.dispatchEvent(new Event('change', { bubbles: true }));
+    inp.blur();
+    
+    log(` ✓ Input "${label}" filled`);
+    return true;
+  }
+  
+  /**
+   * Fill a radio group with the given answer
+   */
+  function fillRadioAnswer(questionData, answer) {
+    const { groupName, label, options } = questionData;
+    
+    if (!groupName) {
+      log(` No groupName for radio question "${label}"`);
+      return false;
+    }
+    
+    const radios = document.querySelectorAll(`input[type="radio"][name="${CSS.escape(groupName)}"]`);
+    const answerLower = answer.toLowerCase();
+    
+    // Find best matching radio
+    for (const radio of radios) {
+      const optLabel = radio.labels?.[0]?.textContent?.trim() ||
+                       document.querySelector(`label[for="${CSS.escape(radio.id)}"]`)?.textContent?.trim() ||
+                       radio.value;
+      
+      if (!optLabel) continue;
+      
+      const optLower = optLabel.toLowerCase();
+      if (optLower === answerLower || optLower.includes(answerLower) || answerLower.includes(optLower)) {
+        radio.click();
+        radio.dispatchEvent(new Event('change', { bubbles: true }));
+        log(` ✓ Radio "${label}" selected: "${optLabel}"`);
+        return true;
+      }
+    }
+    
+    log(` No matching radio option found for "${answer}" in "${label}"`);
+    return false;
+  }
+  
+  /**
+   * Fill a checkbox with the given answer
+   */
+  function fillCheckboxAnswer(questionData, answer) {
+    const { elementId, elementName, label } = questionData;
+    
+    let cb = null;
+    if (elementId) cb = document.getElementById(elementId);
+    if (!cb && elementName) cb = document.querySelector(`input[type="checkbox"][name="${CSS.escape(elementName)}"]`);
+    
+    if (!cb) {
+      log(` Could not find checkbox for "${label}"`);
+      return false;
+    }
+    
+    // Interpret answer as boolean
+    const shouldCheck = /^(yes|true|1|checked|agree)$/i.test(answer.trim());
+    
+    if (cb.checked !== shouldCheck) {
+      cb.click();
+      cb.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    
+    log(` ✓ Checkbox "${label}" set to ${shouldCheck}`);
+    return true;
+  }
+  
+  /**
+   * Fill multiple answers from AI response
+   * Fills ONE question at a time with proper delays
+   * @param {Array} unansweredQuestions - From scanUnansweredQuestions
+   * @param {Array} aiAnswers - Array of {label, answer} from AI
+   * @returns {Object} - { filled: [], failed: [] }
+   */
+  async function fillAIAnswers(unansweredQuestions, aiAnswers) {
+    const results = { filled: [], failed: [] };
+    
+    if (!aiAnswers || !Array.isArray(aiAnswers)) {
+      log(' No AI answers to fill');
+      return results;
+    }
+    
+    log(` Filling ${aiAnswers.length} AI answers one by one...`);
+    
+    for (let i = 0; i < aiAnswers.length; i++) {
+      const aiAnswer = aiAnswers[i];
+      log(`\n--- [${i + 1}/${aiAnswers.length}] Processing: "${aiAnswer.label}" ---`);
+      
+      // Find matching question by label
+      const question = unansweredQuestions.find(q => 
+        q.label.toLowerCase() === aiAnswer.label.toLowerCase() ||
+        q.label.toLowerCase().includes(aiAnswer.label.toLowerCase()) ||
+        aiAnswer.label.toLowerCase().includes(q.label.toLowerCase())
+      );
+      
+      if (!question) {
+        log(` Could not find question matching label "${aiAnswer.label}"`);
+        results.failed.push({ label: aiAnswer.label, reason: 'question not found' });
+        continue;
+      }
+      
+      log(` Question found: kind=${question.kind}, answer="${aiAnswer.answer}"`);
+      
+      // Close any open dropdowns before starting
+      document.body.click();
+      await sleep(300);
+      
+      const success = await fillAnswer(question, aiAnswer.answer);
+      
+      if (success) {
+        results.filled.push(question.label);
+        log(` ✓ Successfully filled "${question.label}"`);
+      } else {
+        results.failed.push({ label: question.label, reason: 'fill failed' });
+        log(` ✗ Failed to fill "${question.label}"`);
+      }
+      
+      // Longer delay between fills to ensure UI settles
+      await sleep(500);
+    }
+    
+    log(`\n AI fill complete: ${results.filled.length} filled, ${results.failed.length} failed`);
+    return results;
+  }
+  
+  /**
+   * Request AI answers for unanswered questions and fill them
+   * @param {Array} unansweredQuestions - From scanUnansweredQuestions
+   * @returns {Promise<Object>} - Fill results
+   */
+  async function requestAndFillAIAnswers(unansweredQuestions) {
+    if (!unansweredQuestions || unansweredQuestions.length === 0) {
+      log(' No unanswered questions to send to AI');
+      return { filled: [], failed: [], skipped: true };
+    }
+    
+    // Only send REQUIRED questions to AI
+    const requiredQuestions = unansweredQuestions.filter(q => q.required);
+    
+    if (requiredQuestions.length === 0) {
+      log(' No required unanswered questions - skipping AI');
+      return { filled: [], failed: [], skipped: true };
+    }
+    
+    log(` Requesting AI answers for ${requiredQuestions.length} REQUIRED questions (skipping ${unansweredQuestions.length - requiredQuestions.length} optional)...`);
+    
+    try {
+      // Send to background script for AI processing
+      const response = await chrome.runtime.sendMessage({
+        type: 'ANSWER_QUESTIONS',
+        questions: requiredQuestions
+      });
+      
+      if (!response.success) {
+        log(' AI request failed:', response.error);
+        return { filled: [], failed: requiredQuestions.map(q => ({ label: q.label, reason: response.error })) };
+      }
+      
+      const aiAnswers = response.answers;
+      log(` Received ${aiAnswers.length} answers from AI`);
+      
+      // Fill the answers (use requiredQuestions for matching)
+      return await fillAIAnswers(requiredQuestions, aiAnswers);
+      
+    } catch (e) {
+      log(' Error requesting AI answers:', e);
+      return { filled: [], failed: requiredQuestions.map(q => ({ label: q.label, reason: e.message })) };
+    }
+  }
+
 
   function matchesAnyKeyword(labelText, keywords) {
     const t = (labelText || '').toLowerCase();
@@ -2463,7 +2878,7 @@
     const unanswered = await scanUnansweredQuestions({
       includeOptions: true,      // 会尝试打开 react-select 下拉并抓 optionsPreview
       maxOptionsPreview: 30,
-      asReactSelectRows: true,   // 让 react-select 返回带 shell 的 row（可用于后续 fill）
+      asReactSelectRows: false,  // Keep original format with required flag intact
     });
 
     results.skippedDetails = unanswered;              // 保留完整对象方便 debug
@@ -2489,6 +2904,9 @@
       showNotificationBanner,
       updateNotificationBanner,
       scanUnansweredQuestions,
+      fillAnswer,
+      fillAIAnswers,
+      requestAndFillAIAnswers,
     });
   } catch (e) {}
 
@@ -2575,6 +2993,44 @@
           sendResponse({ ok: true, count: unanswered.length, unanswered });
         })().catch(e => {
           sendResponse({ ok: false, error: String(e?.message || e), stack: e?.stack });
+        });
+        return true;
+      }
+      
+      case 'FILL_AI_ANSWERS': {
+        // Receive AI answers and fill them
+        (async () => {
+          const { unansweredQuestions, aiAnswers } = message;
+          const results = await fillAIAnswers(unansweredQuestions, aiAnswers);
+          sendResponse({ ok: true, ...results });
+        })().catch(e => {
+          sendResponse({ ok: false, error: String(e?.message || e) });
+        });
+        return true;
+      }
+      
+      case 'REQUEST_AI_FILL': {
+        // Full flow: scan unanswered → ask AI → fill answers
+        (async () => {
+          const payload = message.payload || {};
+          
+          // 1. Scan unanswered questions
+          const unanswered = await scanUnansweredQuestions({
+            includeOptions: true,
+            maxOptionsPreview: 30,
+            asReactSelectRows: true,
+          });
+          
+          if (unanswered.length === 0) {
+            sendResponse({ ok: true, message: 'No unanswered questions found', filled: [], failed: [] });
+            return;
+          }
+          
+          // 2. Request AI answers and fill them
+          const results = await requestAndFillAIAnswers(unanswered);
+          sendResponse({ ok: true, ...results, totalQuestions: unanswered.length });
+        })().catch(e => {
+          sendResponse({ ok: false, error: String(e?.message || e) });
         });
         return true;
       }
@@ -2680,17 +3136,29 @@ function installOneShotPostHydrationRetry({ userData, resumeData, coverLetterDat
 async function autoRunIfEnabled() {
   console.log('[JobAutofill][AutoRun] entered', location.href);
   try {
-    if (!isAutofillTargetPage()) return;
+    if (!isAutofillTargetPage()) {
+      console.log('[JobAutofill][AutoRun] Not a target page, skipping');
+      return;
+    }
 
     const key = pageRunKey();
-    if (sessionStorage.getItem(key) === '1') return;
+    if (sessionStorage.getItem(key) === '1') {
+      console.log('[JobAutofill][AutoRun] Already ran on this page (sessionStorage), skipping');
+      return;
+    }
 
     const { autoFillEnabled = true, userData, resumeData, coverLetterData } =
       await chrome.storage.local.get(['autoFillEnabled', 'userData', 'resumeData', 'coverLetterData']);
 
     // 只有明确设置为 false 才禁用;undefined 视为开启(兼容旧数据)
-    if (autoFillEnabled === false) return;
-    if (!userData) return;
+    if (autoFillEnabled === false) {
+      console.log('[JobAutofill][AutoRun] autoFillEnabled is false, skipping');
+      return;
+    }
+    if (!userData) {
+      console.log('[JobAutofill][AutoRun] No userData found, skipping');
+      return;
+    }
 
     const ready = await waitForFormReady();
     if (!ready) return;
@@ -2717,25 +3185,57 @@ async function autoRunIfEnabled() {
 
     const filledCount = Array.isArray(result?.filled) ? result.filled.length : 0;
     const resumeOk = !!result?.resumeUploaded;
-    let unanswered = [];
-    try {
-      // Auto-run 时建议 includeOptions:false(不去开 dropdown,避免闪烁/变慢)
-      unanswered = await scanUnansweredQuestions({ includeOptions: false });
-    } catch (e) {
-      unanswered = [];
-    }
+    
+    // Use the unanswered questions already scanned by performAutofill
+    // This has correct required flags
+    const unanswered = result?.skippedDetails || [];
+    console.log(`[JobAutofill] Using ${unanswered.length} unanswered questions from performAutofill`);
+    const requiredCount = unanswered.filter(q => q.required).length;
+    console.log(`[JobAutofill] Of which ${requiredCount} are required`);
 
     await chrome.storage.local.set({
       lastUnanswered: { url: location.href, ts: Date.now(), unanswered }
     });
 
-    if (filledCount > 0 || resumeOk) {
+    // ========== AI Fill Phase ==========
+    // Only call AI if there are unanswered questions AND AI is enabled
+    let aiFillResult = { filled: [], failed: [] };
+    console.log(`[JobAutofill] Checking AI phase: ${unanswered.length} unanswered questions`);
+    if (unanswered.length > 0) {
+      try {
+        const { aiEnabled = true } = await chrome.storage.local.get(['aiEnabled']);
+        console.log(`[JobAutofill] aiEnabled = ${aiEnabled}`);
+        
+        if (aiEnabled !== false) {
+          const requiredQuestions = unanswered.filter(q => q.required);
+          console.log(`[JobAutofill] Calling AI for ${requiredQuestions.length} REQUIRED questions (skipping ${unanswered.length - requiredQuestions.length} optional)...`);
+          updateNotificationBanner('running', { message: 'AI is answering custom questions...' });
+          
+          aiFillResult = await requestAndFillAIAnswers(unanswered);
+          console.log('[JobAutofill] AI fill result:', aiFillResult);
+        } else {
+          console.log('[JobAutofill] AI is disabled');
+        }
+      } catch (aiErr) {
+        console.warn('[JobAutofill] AI fill failed:', aiErr);
+        aiFillResult.error = aiErr.message;
+      }
+    } else {
+      console.log('[JobAutofill] No unanswered questions, skipping AI');
+    }
+
+    // Combine results
+    const totalFilled = filledCount + (aiFillResult.filled?.length || 0);
+    const remainingUnanswered = unanswered.length - (aiFillResult.filled?.length || 0);
+
+    if (totalFilled > 0 || resumeOk) {
       window.__JOB_AUTOFILL__?.updateNotificationBanner?.('success', {
-      filledCount,
-      resumeUploaded: !!result?.resumeUploaded,
-      coverLetterUploaded: !!result?.coverLetterUploaded,
-      unansweredCount: unanswered.length,
-    });
+        filledCount: totalFilled,
+        resumeUploaded: !!result?.resumeUploaded,
+        coverLetterUploaded: !!result?.coverLetterUploaded,
+        unansweredCount: remainingUnanswered,
+        aiFilledCount: aiFillResult.filled?.length || 0,
+      });
     } else {
       window.__JOB_AUTOFILL__?.updateNotificationBanner?.('error', {
         message: 'Auto-fill ran, but nothing was filled.'
