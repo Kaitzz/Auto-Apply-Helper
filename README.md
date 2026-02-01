@@ -1,24 +1,46 @@
-# Auto-Apply Helper (BETA) — v0.9.5
+# Auto-Apply Helper (BETA) — v0.9.6
 
-A Chrome extension that helps you **autofill job application forms** (Greenhouse-first), including **basic fields + resume/attachments upload**.
+A Chrome extension that helps you **autofill job application forms** (Greenhouse-first), including **basic fields + resume/attachments upload + AI-powered custom question answering**.
 
 > Status: **BETA** — works best on Greenhouse job application pages.  
-> If you see a warning like `form not settled in time; continue in safe mode`, the extension will continue carefully without trying to “fight” the page hydration.
+> If you see a warning like `form not settled in time; continue in safe mode`, the extension will continue carefully without trying to "fight" the page hydration.
 
 ---
 
 ## ✨ What it does
 
-- Detects supported job application pages and shows an **in-page notification** with a quick action to open the side panel. :contentReference[oaicite:0]{index=0}
+- Detects supported job application pages and shows an **in-page notification** with a quick action to open the side panel.
 - Autofills common fields (only when the field is empty to avoid overwriting your manual input):
   - First name / Last name / Preferred name / Email / Phone
   - City / State / ZIP
   - LinkedIn / GitHub / Website/Portfolio
   - School / Degree / Major/Discipline / Education years
   - Current company
-  - Some authorization / sponsorship / demographic-like fields (best-effort, depends on how the site implements them) :contentReference[oaicite:1]{index=1}
-- Uploads attachments (Resume/CV, Cover Letter, etc.) when the form provides upload controls.
-- “Safe mode” guard on dynamic pages: if the page is still “settling” (React hydration / re-render), it will avoid aggressive actions that may break the form UI.
+  - Work authorization / sponsorship fields
+  - EEO demographic fields (gender, race/ethnicity, veteran status, disability status)
+- Uploads attachments (Resume/CV, Cover Letter) when the form provides upload controls.
+- **🆕 AI-Powered Custom Questions**: Uses Claude AI to automatically answer required custom questions (e.g., "How did you hear about us?", "Have you worked here before?")
+- "Safe mode" guard on dynamic pages: if the page is still "settling" (React hydration / re-render), it will avoid aggressive actions that may break the form UI.
+
+---
+
+## 🤖 AI Features (New in v0.9.6)
+
+- **Automatic detection** of unanswered required questions after standard autofill
+- **Claude AI integration** to generate contextual answers based on your profile
+- **Smart React-Select handling** — properly fills dropdown menus with AI-suggested answers
+- **Toggle control** in sidepanel to enable/disable AI answering
+- Only **required questions** are sent to AI — optional questions are skipped to save API calls
+
+### Setup AI
+
+1. Get a Claude API key from [Anthropic Console](https://console.anthropic.com/)
+2. Copy `extension/config.js` to `extension/config.local.js`
+3. Add your API key in `config.local.js`:
+   ```javascript
+   const CLAUDE_API_KEY_LOCAL = 'your-api-key-here';
+   ```
+4. Reload the extension
 
 ---
 
@@ -26,11 +48,11 @@ A Chrome extension that helps you **autofill job application forms** (Greenhouse
 
 ### Greenhouse
 
-- Job application pages under `*.greenhouse.io/.../jobs/<number>` are detected as application pages. :contentReference[oaicite:2]{index=2}
+- Job application pages under `*.greenhouse.io/.../jobs/<number>` are detected as application pages.
 
 ### Generic application pages (best-effort)
 
-- If the page contains `#application_form` or a form whose action contains `apply`, the extension will attempt a generic autofill. :contentReference[oaicite:3]{index=3}
+- If the page contains `#application_form` or a form whose action contains `apply`, the extension will attempt a generic autofill.
 
 > Not currently supported / unreliable: Workday-style multi-step portals, highly customized SPA portals with anti-automation guardrails.
 
@@ -39,29 +61,28 @@ A Chrome extension that helps you **autofill job application forms** (Greenhouse
 ## 🚀 How to use
 
 1. **Install the extension**
-   - If you’re developing locally: load unpacked from `chrome://extensions` → enable **Developer mode** → **Load unpacked** → select the extension folder.
+   - If you're developing locally: load unpacked from `chrome://extensions` → enable **Developer mode** → **Load unpacked** → select the extension folder.
 
 2. **Open a job application page**
    - Example: a Greenhouse job page with an **Apply** form.
 
-3. **When the notification appears**, click **“Open Panel to Update Info”**
+3. **When the notification appears**, click **"Open Panel to Update Info"**
    - This opens the side panel where you can edit and save your profile data.
 
 4. **Autofill runs automatically**
-   - It will only fill fields that are currently empty.
-   - If the page is dynamic, you may see a warning:
-     - `form not settled in time; continue in safe mode`
-   - That’s expected in BETA — the extension proceeds conservatively.
+   - Standard fields are filled first
+   - Then AI answers any remaining required custom questions
+   - Toggle AI on/off with the switch in the sidepanel
 
 ---
 
 ## 🔐 Data & Privacy
 
 - Your profile data is stored locally using Chrome extension storage (`chrome.storage.local`).
+- AI requests are sent directly to Anthropic's API — no intermediate servers.
 - This extension does **not** sell or share your data.
 - The extension only runs on supported application pages and only uses your data to fill the form fields you see.
-
-> If you plan to publish to the Chrome Web Store, include a `PRIVACY_POLICY.md` in the repo and link it in the listing.
+- API keys are stored locally in `config.local.js` (gitignored) and never committed to version control.
 
 ---
 
@@ -69,7 +90,8 @@ A Chrome extension that helps you **autofill job application forms** (Greenhouse
 
 ### Debug logging
 
-- The content script includes debug logs (e.g. `[JobAutofill] ...`). :contentReference[oaicite:4]{index=4}  
+- The content script includes debug logs (e.g. `[JobAutofill] ...`).
+- Background service worker logs with `[Background] ...`.
 - You can inspect logs via **DevTools → Console** on the job application page.
 
 ### Typical workflow
@@ -79,45 +101,56 @@ A Chrome extension that helps you **autofill job application forms** (Greenhouse
 3. Click **Reload** on the extension
 4. Refresh the job application page
 
+### Building the sidepanel
+
+```bash
+cd extension/sidepanel
+npm install
+npm run build
+```
+
 ---
 
 ## 🩺 Troubleshooting
 
-### “It says it filled, but the input is still empty”
+### "It says it filled, but the input is still empty"
 
 Some sites (especially React-controlled inputs) ignore direct `element.value = ...` unless the correct native setter + input events are used.  
-In v0.9.5 we handle this more safely, but if you see regressions:
-
-- Verify the field is not being immediately overwritten by the site after your fill event
-- Check Console logs for “safe mode” or hydration-related warnings
+The extension uses `setNativeInputValue` and proper event dispatching to handle this.
 
 ### Warning: `form not settled in time; continue in safe mode`
 
-This means the page didn’t reach a stable state quickly enough (DOM keeps changing / hydration still running).  
+This means the page didn't reach a stable state quickly enough (DOM keeps changing / hydration still running).  
 The extension continues conservatively to avoid triggering hydration crashes.
 
-### React / hydration errors in the page console
+### AI not working
 
-You may see site-owned logs like React hydration errors (Rollbar / minified react-dom).  
-These are usually **from the website itself**, and the extension’s goal is to **avoid making them worse** by running in safe mode.
+- Check that `config.local.js` exists with a valid API key
+- Check the background service worker console for API errors
+- Ensure the AI toggle is enabled in the sidepanel
+
+### React-Select dropdown not selecting
+
+The extension uses the proven `selectReactSelectValue` method with proper pointer events and input simulation. If issues persist, check the console for detailed logs.
 
 ---
 
 ## 🗺️ Roadmap (next)
 
-- Improve coverage for “basic inputs” across more Greenhouse variants
-- Better detection for multi-step application flows
-- Optional “Fill anyway” button when safe mode triggers (manual override)
+- Support for more job boards (Lever, Workday, etc.)
+- Resume text extraction for better AI context
+- Custom prompt templates for different question types
 - Field mapping customization UI (user-defined selectors / aliases)
 
 ---
 
-## 📌 Version
+## 📌 Version History
 
-- **v0.9.5 (BETA)** — Greenhouse autofill + attachments upload stabilized; safe-mode guard added for dynamic/hydrating pages.
+- **v0.9.6 (BETA)** — Claude AI integration for answering custom questions; improved React-Select handling; AI toggle in sidepanel
+- **v0.9.5 (BETA)** — Greenhouse autofill + attachments upload stabilized; safe-mode guard added for dynamic/hydrating pages
 
 ---
 
 ## License
 
-TBD (MIT recommended if you plan to open-source).
+MIT License - see LICENSE file for details.
