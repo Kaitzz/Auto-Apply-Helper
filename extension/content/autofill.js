@@ -2125,6 +2125,125 @@
     await sleep(40);
   }
 
+  /**
+   * Specialized react-select handler for location/city fields.
+   * Prefers US/Canada cities based on user's state or country.
+   */
+  async function selectLocationReactSelectValue(inputEl, cityName, userState) {
+    if (!isReactSelectComboboxInput(inputEl)) return false;
+    if (!cityName) return false;
+
+    // Open the react-select dropdown
+    await openReactSelect(inputEl);
+    await sleep(50);
+
+    // Clear and type the city name, dispatching input event to trigger search
+    setNativeInputValue(inputEl, '');
+    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+    await sleep(50);
+    
+    setNativeInputValue(inputEl, cityName);
+    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+    
+    // Wait longer for location API to return results (async search)
+    await sleep(400);
+
+    let options = getReactSelectOptions(inputEl);
+    
+    // If no options yet, wait a bit more (location APIs can be slow)
+    if (!options.length) {
+      await sleep(300);
+      options = getReactSelectOptions(inputEl);
+    }
+    
+    if (!options.length) return false;
+
+    // Build preference patterns for US/Canada
+    const usCanadaPatterns = [
+      'united states', 'usa', ', us', ', u.s.',
+      'canada', ', ca,', // ", CA," for Canadian provinces
+    ];
+    
+    // Add user's state to preference if available (e.g., "California", "CA")
+    if (userState) {
+      const stateNorm = userState.toLowerCase().trim();
+      usCanadaPatterns.push(stateNorm);
+      // Also add state code if we have the full name
+      const stateCode = US_STATE_CODE_BY_NAME[stateNorm];
+      if (stateCode) {
+        usCanadaPatterns.push(`, ${stateCode.toLowerCase()},`);
+        usCanadaPatterns.push(`, ${stateCode.toLowerCase()}`);
+      }
+      // Check Canadian provinces too
+      const provCode = CA_PROVINCE_CODE_BY_NAME[stateNorm];
+      if (provCode) {
+        usCanadaPatterns.push(`, ${provCode.toLowerCase()},`);
+        usCanadaPatterns.push(`, ${provCode.toLowerCase()}`);
+      }
+    }
+
+    const cityNorm = cityName.toLowerCase().trim();
+    let bestOption = null;
+    let bestScore = -1;
+
+    for (const opt of options) {
+      const text = (opt.textContent || '').toLowerCase().trim();
+      if (!text) continue;
+
+      let score = 0;
+
+      // Base score: does it contain the city name?
+      if (!text.includes(cityNorm) && !hasWholeWord(text, cityNorm)) continue;
+      score = 10;
+
+      // Bonus for US/Canada match
+      for (const pattern of usCanadaPatterns) {
+        if (text.includes(pattern)) {
+          score += 50;
+          break;
+        }
+      }
+
+      // Extra bonus if user's state matches exactly
+      if (userState) {
+        const stateNorm = userState.toLowerCase().trim();
+        const stateCode = US_STATE_CODE_BY_NAME[stateNorm] || CA_PROVINCE_CODE_BY_NAME[stateNorm];
+        if (stateCode && text.includes(`, ${stateCode.toLowerCase()}`)) {
+          score += 30; // Strong preference for user's exact state
+        } else if (text.includes(stateNorm)) {
+          score += 20;
+        }
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestOption = opt;
+      }
+    }
+
+    // If no US/Canada match found, fall back to first matching option
+    if (!bestOption) {
+      for (const opt of options) {
+        const text = (opt.textContent || '').toLowerCase().trim();
+        if (text.includes(cityNorm) || hasWholeWord(text, cityNorm)) {
+          bestOption = opt;
+          break;
+        }
+      }
+    }
+
+    if (!bestOption) return false;
+
+    bestOption.scrollIntoView({ block: 'nearest' });
+    dispatchMouseLikeClick(bestOption);
+    await sleep(80);
+
+    if (!getReactSelectListbox(inputEl)) return true;
+    if (inputEl.getAttribute('aria-expanded') === 'false') return true;
+
+    return false;
+  }
+
   async function selectReactSelectValue(inputEl, candidates) {
     if (!isReactSelectComboboxInput(inputEl)) return false;
     if (!candidates?.some(Boolean)) return false;
@@ -2775,6 +2894,7 @@
     // Fill standard fields (excluding phone - handled separately)
     const standardFields = [
       'first_name', 'last_name', 'preferred_first_name', 'email',
+      'city', 'state', 'zip',
       'current_company',
       'linkedin', 'github', 'website'
     ];
@@ -2784,6 +2904,9 @@
       last_name: ['last name'],
       preferred_first_name: ['preferred first', 'preferred name'],
       email: ['email'],
+      city: ['city', 'location (city)', 'location'],
+      state: ['state', 'province'],
+      zip: ['zip', 'postal', 'postcode'],
       linkedin: ['linkedin'],
       github: ['github'],
       website: ['portfolio', 'website', 'personal website'],
@@ -2795,6 +2918,19 @@
       if (!value) continue;
 
       let ok = fillField(fieldName, value, FIELD_MAPPINGS);
+
+      // Special handling for city react-select: prefer US/Canada cities
+      if (!ok && fieldName === 'city') {
+        const cityKeywords = BASIC_LABEL_KEYWORDS.city;
+        const comboInputs = Array.from(document.querySelectorAll('input.select__input[role="combobox"]'));
+        for (const input of comboInputs) {
+          const lab = labelTextForInput(input);
+          if (!matchesAnyKeyword(lab, cityKeywords)) continue;
+          if (reactSelectHasAnySelection(input)) continue;
+          ok = await selectLocationReactSelectValue(input, value, dataToFill.state);
+          if (ok) break;
+        }
+      }
 
       // Fallback: fill by label text (more robust on Greenhouse)
       if (!ok && BASIC_LABEL_KEYWORDS[fieldName]) {
