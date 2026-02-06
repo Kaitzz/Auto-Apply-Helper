@@ -56,9 +56,9 @@
 
     notif.style.padding = '12px 14px';
     notif.style.borderRadius = '12px';
-    notif.style.border = '1px solid #3b82f6';
-    notif.style.backgroundColor = '#eff6ff';
-    notif.style.color = '#1e3a8a';
+    notif.style.border = '1px solid #558ae0';
+    notif.style.backgroundColor = '#ecf3ff';
+    notif.style.color = '#1e3a5f';
     notif.style.fontSize = '13px';
     notif.style.lineHeight = '1.35';
     notif.style.zIndex = '999999';
@@ -85,7 +85,7 @@
         <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
           <button id="job-autofill-open-panel"
             style="padding:5px 8px; font-size:12px; border:none; border-radius:8px; cursor:pointer;
-                  background:#2563eb; color:white;">
+                  background:#558ae0; color:white;">
             Update
           </button>
           <button id="job-autofill-close"
@@ -146,13 +146,13 @@
     const resumeUploaded = !!payload.resumeUploaded;
     const coverLetterUploaded = !!payload.coverLetterUploaded;
 
-    // Theme by state
+    // Theme by state - all use same light blue background for consistency
     const theme = {
-      supported: { border: '#3b82f6', bg: '#eff6ff', fg: '#1e3a8a' },
-      running:   { border: '#3b82f6', bg: '#eff6ff', fg: '#1e3a8a' },
-      success:   { border: '#22c55e', bg: '#f0fdf4', fg: '#14532d' },
+      supported: { border: '#558ae0', bg: '#ecf3ff', fg: '#1e3a5f' },
+      running:   { border: '#8faee0', bg: '#ecf3ff', fg: '#1e3a5f' },
+      success:   { border: '#558ae0', bg: '#ecf3ff', fg: '#1e3a5f' },
       error:     { border: '#ef4444', bg: '#fef2f2', fg: '#7f1d1d' }
-    }[__jobAutofillBannerState] || { border: '#3b82f6', bg: '#eff6ff', fg: '#1e3a8a' };
+    }[__jobAutofillBannerState] || { border: '#558ae0', bg: '#ecf3ff', fg: '#1e3a5f' };
 
     notif.style.borderColor = theme.border;
     notif.style.backgroundColor = theme.bg;
@@ -572,11 +572,14 @@
     const results = [];
     const seenLabels = new Set();
     
-    // Helper: check if label should be skipped (already handled by autofill)
-    const SKIP_LABELS = [
-      'first name', 'last name', 'email', 'phone', 'linkedin', 'github',
-      'resume', 'cover letter', 'country'
-    ];
+    // Note: We no longer skip labels based on keywords like "country", "city" etc.
+    // The function already checks if fields are empty/unanswered, so only truly
+    // unanswered questions will be included. This fixes the bug where questions
+    // like "Which country in the UK do you reside in?" were skipped because
+    // they contained "country", even though they weren't filled.
+    
+    // Helper: check if label should be skipped (only skip file upload labels)
+    const SKIP_LABELS = ['resume', 'cover letter'];
     function shouldSkipLabel(label) {
       const l = (label || '').toLowerCase();
       return SKIP_LABELS.some(skip => l.includes(skip));
@@ -3177,7 +3180,12 @@ async function autoRunIfEnabled() {
     const totalFilled = filledCount + (aiFillResult.filled?.length || 0);
     const remainingUnanswered = unanswered.length - (aiFillResult.filled?.length || 0);
 
+    // Wait for page to settle before showing success banner
+    // This ensures all scroll/fill animations are complete
     if (totalFilled > 0 || resumeOk) {
+      // Wait up to 3 seconds for DOM to stabilize (500ms of no changes)
+      await waitForDomStable(document.body, { timeoutMs: 3000, stableMs: 500, pollMs: 100 });
+      
       window.__JOB_AUTOFILL__?.updateNotificationBanner?.('success', {
         filledCount: totalFilled,
         resumeUploaded: !!result?.resumeUploaded,

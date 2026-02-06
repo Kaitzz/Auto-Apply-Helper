@@ -349,7 +349,7 @@ function App() {
       onClick={handleSave}
       className={`w-full mt-4 py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors ${
         saveStatus[activeTab] === 'saved'
-          ? 'bg-green-100 text-green-700 border border-green-300'
+          ? 'bg-brand-lighter text-brand-dark border border-brand-light'
           : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300'
       }`}
     >
@@ -369,22 +369,21 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-4">
-        <h1 className="text-lg font-semibold">Auto-Apply Helper</h1>
-        {formType && formType.detected && (
-          <p className="text-blue-100 text-sm mt-1">
+      {/* Header - only show when form detected */}
+      {formType && formType.detected && (
+        <div className="bg-gradient-to-r from-brand to-brand-dark text-white px-4 py-2">
+          <p className="text-sm">
             Detected: {formType.type.charAt(0).toUpperCase() + formType.type.slice(1)} form
           </p>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Status Message */}
       {status.message && (
         <div className={`p-3 flex items-center gap-2 ${
-          status.type === 'success' ? 'bg-green-50 text-green-700' :
+          status.type === 'success' ? 'bg-brand-50 text-brand-dark' :
           status.type === 'error' ? 'bg-red-50 text-red-700' :
-          'bg-blue-50 text-blue-700'
+          'bg-brand-lighter text-brand-dark'
         }`}>
           {status.type === 'success' && <Check size={16} />}
           {status.type === 'error' && <AlertCircle size={16} />}
@@ -396,7 +395,7 @@ function App() {
       <div className="p-4 border-b bg-white">
         <button
           onClick={handleAutofill}
-          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors"
+          className="w-full bg-brand hover:bg-brand-dark text-white font-medium py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors"
         >
           <Zap size={18} />
           Fill Application
@@ -412,7 +411,7 @@ function App() {
               storage.set({ aiEnabled: newValue })
             }}
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-              aiEnabled ? 'bg-blue-600' : 'bg-gray-300'
+              aiEnabled ? 'bg-brand' : 'bg-gray-300'
             }`}
           >
             <span
@@ -432,7 +431,7 @@ function App() {
             onClick={() => setActiveTab(tab.id)}
             className={`flex-1 py-3 px-1 flex items-center justify-center gap-1 text-xs font-medium transition-colors ${
               activeTab === tab.id
-                ? 'text-blue-600 border-b-2 border-blue-600'
+                ? 'text-brand border-b-2 border-brand'
                 : 'text-gray-500 hover:text-gray-700'
             }`}
           >
@@ -569,7 +568,7 @@ function App() {
               onChange={handleInputChange}
               options={WORK_AUTH_OPTIONS.map(a => ({ value: a.value, label: a.label }))}
             />
-            <div className={`text-xs p-2 rounded ${needsSponsorship() ? 'bg-amber-50 text-amber-700' : 'bg-green-50 text-green-700'}`}>
+            <div className={`text-xs p-2 rounded ${needsSponsorship() ? 'bg-amber-50 text-amber-700' : 'bg-brand-50 text-brand-dark'}`}>
               {needsSponsorship() 
                 ? '⚠️ Will answer "Yes" to sponsorship questions'
                 : '✓ Will answer "No" to sponsorship questions'
@@ -713,8 +712,8 @@ function App() {
           <div className="space-y-4">
             
             {/* Resume Upload */}
-            <div className="border-2 rounded-lg p-3 border-blue-500 bg-blue-50">
-              <div className="border-2 border-dashed border-gray-300 rounded-lg p-3 text-center bg-white">
+            <div className="border-2 border-gray-200 rounded-lg p-3">
+              <div className="border-2 border-dashed border-gray-300 rounded-lg p-3 text-center">
                 <input
                   type="file"
                   id="resume-upload"
@@ -729,12 +728,12 @@ function App() {
                 </label>
               </div>
               {resumeData && (
-                <div className="mt-2 bg-green-50 border border-green-200 rounded-lg p-2 flex items-center gap-2">
-                  <FileText className="text-green-600" size={16} />
-                  <span className="text-xs text-green-800 truncate flex-1">{resumeData.filename}</span>
+                <div className="mt-2 bg-brand-lighter border border-brand-light rounded-lg p-2 flex items-center gap-2">
+                  <FileText className="text-brand" size={16} />
+                  <span className="text-xs text-brand-dark truncate flex-1">{resumeData.filename}</span>
                   <button
                     onClick={() => { setResumeData(null); storage.set({ resumeData: null }) }}
-                    className="text-green-600 hover:text-green-800 text-xs"
+                    className="text-brand hover:text-brand-dark text-xs"
                   >
                     ✕
                   </button>
@@ -760,12 +759,12 @@ function App() {
                 </label>
               </div>
               {coverLetterData && (
-                <div className="mt-2 bg-green-50 border border-green-200 rounded-lg p-2 flex items-center gap-2">
-                  <FileText className="text-green-600" size={16} />
-                  <span className="text-xs text-green-800 truncate flex-1">{coverLetterData.filename}</span>
+                <div className="mt-2 bg-brand-lighter border border-brand-light rounded-lg p-2 flex items-center gap-2">
+                  <FileText className="text-brand" size={16} />
+                  <span className="text-xs text-brand-dark truncate flex-1">{coverLetterData.filename}</span>
                   <button
                     onClick={() => { setCoverLetterData(null); storage.set({ coverLetterData: null }) }}
-                    className="text-green-600 hover:text-green-800 text-xs"
+                    className="text-brand hover:text-brand-dark text-xs"
                   >
                     ✕
                   </button>
