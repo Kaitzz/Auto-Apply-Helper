@@ -1185,6 +1185,82 @@
   }
   
   /**
+   * Check if a question is a verification/confirmation of experience/requirements
+   * These are self-attestation questions that should be answered "Yes" when applying
+   */
+  function isVerificationQuestion(question) {
+    const label = (question.label || '').toLowerCase();
+    
+    // Must contain verification keywords
+    const hasVerifyKeyword = 
+      label.includes('verify') || 
+      label.includes('confirm') || 
+      label.includes('acknowledge') ||
+      label.includes('attest') ||
+      label.includes('certify');
+    
+    // Must be about experience/requirements/qualifications
+    const hasExperienceKeyword = 
+      label.includes('experience') || 
+      label.includes('requirement') ||
+      label.includes('qualification') ||
+      label.includes('years of') ||
+      label.includes('proficien') ||
+      label.includes('familiar') ||
+      label.includes('background in');
+    
+    return hasVerifyKeyword && hasExperienceKeyword;
+  }
+  
+  /**
+   * Check if the question options include a "Yes" option
+   */
+  function hasYesOption(question) {
+    if (!question.options || !Array.isArray(question.options)) return false;
+    return question.options.some(opt => {
+      const o = (typeof opt === 'string' ? opt : opt.label || '').toLowerCase().trim();
+      return o === 'yes' || o === 'yes, i confirm' || o === 'yes, i verify' || o.startsWith('yes');
+    });
+  }
+  
+  /**
+   * Pre-fill verification/confirmation questions with "Yes" before AI processing.
+   * Returns: { filled: [...labels], remaining: [...questions not handled] }
+   */
+  async function prefillVerificationQuestions(questions) {
+    const filled = [];
+    const remaining = [];
+    
+    for (const question of questions) {
+      // Check if this is a verification question with a Yes option
+      if (isVerificationQuestion(question) && hasYesOption(question)) {
+        log(` Auto-filling verification question: "${question.label}" → Yes`);
+        
+        // Close any open dropdowns
+        document.body.click();
+        await sleep(200);
+        
+        const success = await fillAnswer(question, 'Yes');
+        
+        if (success) {
+          filled.push(question.label);
+          log(` ✓ Auto-filled verification question`);
+        } else {
+          // If auto-fill failed, let AI handle it
+          remaining.push(question);
+          log(` Could not auto-fill, will send to AI`);
+        }
+        
+        await sleep(300);
+      } else {
+        remaining.push(question);
+      }
+    }
+    
+    return { filled, remaining };
+  }
+  
+  /**
    * Request AI answers for unanswered questions and fill them
    * @param {Array} unansweredQuestions - From scanUnansweredQuestions
    * @returns {Promise<Object>} - Fill results
@@ -1195,38 +1271,83 @@
       return { filled: [], failed: [], skipped: true };
     }
     
-    // Only send REQUIRED questions to AI
-    const requiredQuestions = unansweredQuestions.filter(q => q.required);
+    const allFilled = [];
+    const allFailed = [];
     
-    if (requiredQuestions.length === 0) {
-      log(' No required unanswered questions - skipping AI');
-      return { filled: [], failed: [], skipped: true };
+    // Phase 0: Pre-fill verification/confirmation questions with "Yes"
+    log(` Phase 0: Checking for verification/confirmation questions...`);
+    const { filled: verifyFilled, remaining: afterVerify } = await prefillVerificationQuestions(unansweredQuestions);
+    allFilled.push(...verifyFilled);
+    
+    if (afterVerify.length === 0) {
+      log(` All questions were verification questions - no AI needed`);
+      return { filled: allFilled, failed: allFailed, skipped: false };
     }
     
-    log(` Requesting AI answers for ${requiredQuestions.length} REQUIRED questions (skipping ${unansweredQuestions.length - requiredQuestions.length} optional)...`);
+    // Separate required and optional questions from remaining
+    const requiredQuestions = afterVerify.filter(q => q.required);
+    const optionalQuestions = afterVerify.filter(q => !q.required);
     
-    try {
-      // Send to background script for AI processing
-      const response = await chrome.runtime.sendMessage({
-        type: 'ANSWER_QUESTIONS',
-        questions: requiredQuestions
-      });
+    // Phase 1: Answer required questions first
+    if (requiredQuestions.length > 0) {
+      log(` Phase 1: Requesting AI answers for ${requiredQuestions.length} REQUIRED questions...`);
       
-      if (!response.success) {
-        log(' AI request failed:', response.error);
-        return { filled: [], failed: requiredQuestions.map(q => ({ label: q.label, reason: response.error })) };
+      try {
+        const response = await chrome.runtime.sendMessage({
+          type: 'ANSWER_QUESTIONS',
+          questions: requiredQuestions
+        });
+        
+        if (!response.success) {
+          log(' AI request failed for required questions:', response.error);
+          allFailed.push(...requiredQuestions.map(q => ({ label: q.label, reason: response.error })));
+        } else {
+          const aiAnswers = response.answers;
+          log(` Received ${aiAnswers.length} answers for required questions`);
+          
+          const results = await fillAIAnswers(requiredQuestions, aiAnswers);
+          allFilled.push(...results.filled);
+          allFailed.push(...results.failed);
+        }
+      } catch (e) {
+        log(' Error requesting AI answers for required questions:', e);
+        allFailed.push(...requiredQuestions.map(q => ({ label: q.label, reason: e.message })));
       }
-      
-      const aiAnswers = response.answers;
-      log(` Received ${aiAnswers.length} answers from AI`);
-      
-      // Fill the answers (use requiredQuestions for matching)
-      return await fillAIAnswers(requiredQuestions, aiAnswers);
-      
-    } catch (e) {
-      log(' Error requesting AI answers:', e);
-      return { filled: [], failed: requiredQuestions.map(q => ({ label: q.label, reason: e.message })) };
+    } else {
+      log(' No required unanswered questions');
     }
+    
+    // Phase 2: Answer optional questions
+    if (optionalQuestions.length > 0) {
+      log(` Phase 2: Requesting AI answers for ${optionalQuestions.length} OPTIONAL questions...`);
+      
+      try {
+        const response = await chrome.runtime.sendMessage({
+          type: 'ANSWER_QUESTIONS',
+          questions: optionalQuestions
+        });
+        
+        if (!response.success) {
+          log(' AI request failed for optional questions:', response.error);
+          // Don't add optional failures to failed list - they're optional
+        } else {
+          const aiAnswers = response.answers;
+          log(` Received ${aiAnswers.length} answers for optional questions`);
+          
+          const results = await fillAIAnswers(optionalQuestions, aiAnswers);
+          allFilled.push(...results.filled);
+          // Don't add optional failures to failed list
+        }
+      } catch (e) {
+        log(' Error requesting AI answers for optional questions:', e);
+        // Don't add optional failures to failed list
+      }
+    } else {
+      log(' No optional unanswered questions');
+    }
+    
+    log(` AI fill complete: ${allFilled.length} filled, ${allFailed.length} failed`);
+    return { filled: allFilled, failed: allFailed, skipped: false };
   }
 
 
@@ -1279,8 +1400,9 @@
     if (!desiredValue) return false;
     const { skipIfSelected = false } = opts;
 
-    // A) react-select combobox
-    const comboInputs = Array.from(document.querySelectorAll('input.select__input[role="combobox"]'));
+    // A) react-select combobox (skip phone-input country selectors)
+    const comboInputs = Array.from(document.querySelectorAll('input.select__input[role="combobox"]'))
+      .filter(input => !input.closest('.phone-input, .iti')); // Exclude phone country selector
     for (const input of comboInputs) {
       const lab = labelTextForInput(input);
       if (!matchesAnyKeyword(lab, keywords)) continue;
@@ -1368,6 +1490,12 @@
       // Greenhouse: label is inside select__container, select-shell is sibling
       const selectContainer = label.parentElement;
       if (!selectContainer) continue;
+      
+      // Skip phone-input country selectors
+      if (selectContainer.closest('.phone-input, .iti')) {
+        log(' Skipping phone-input country selector');
+        continue;
+      }
       
       // Find the select-shell sibling
       const selectShell = selectContainer.querySelector('.select-shell, [class*="select-shell"]');
@@ -1587,9 +1715,9 @@
       if (bestMatch && bestScore >= 40) {
         log(` ✓ Best match: "${bestMatch.textContent?.substring(0, 50)}" (score: ${bestScore})`);
         
-        // Scroll option into view
-        bestMatch.scrollIntoView({ block: 'nearest' });
-        await new Promise(r => setTimeout(r, 100));
+        // Scroll option into view smoothly
+        bestMatch.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        await new Promise(r => setTimeout(r, 150));
         
         // Click using pointer events
         const optRect = bestMatch.getBoundingClientRect();
@@ -2234,9 +2362,15 @@
 
     if (!bestOption) return false;
 
-    bestOption.scrollIntoView({ block: 'nearest' });
+    log(` Location: selected "${bestOption.textContent?.trim()}" (score: ${bestScore})`);
+    bestOption.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    await sleep(150); // Wait for smooth scroll
     dispatchMouseLikeClick(bestOption);
-    await sleep(80);
+    await sleep(200); // Longer delay after click
+
+    // Close dropdown by clicking elsewhere
+    document.body.click();
+    await sleep(100);
 
     if (!getReactSelectListbox(inputEl)) return true;
     if (inputEl.getAttribute('aria-expanded') === 'false') return true;
@@ -2262,9 +2396,10 @@
       const { best, bestScore } = findBestOption(options, cand);
       if (!best || bestScore < 80) continue;
 
-      best.scrollIntoView({ block: 'nearest' });
+      best.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      await sleep(100); // Wait for smooth scroll
       dispatchMouseLikeClick(best);
-      await sleep(80);
+      await sleep(150);
 
       if (!getReactSelectListbox(inputEl)) return true;
       if (inputEl.getAttribute('aria-expanded') === 'false') return true;
@@ -2922,18 +3057,28 @@
       // Special handling for city react-select: prefer US/Canada cities
       if (!ok && fieldName === 'city') {
         const cityKeywords = BASIC_LABEL_KEYWORDS.city;
-        const comboInputs = Array.from(document.querySelectorAll('input.select__input[role="combobox"]'));
+        const comboInputs = Array.from(document.querySelectorAll('input.select__input[role="combobox"]'))
+          .filter(input => !input.closest('.phone-input, .iti')); // Exclude phone country selector
         for (const input of comboInputs) {
           const lab = labelTextForInput(input);
           if (!matchesAnyKeyword(lab, cityKeywords)) continue;
-          if (reactSelectHasAnySelection(input)) continue;
+          if (reactSelectHasAnySelection(input)) {
+            log(` City field already has selection, skipping`);
+            ok = true; // Mark as done so we don't try again
+            break;
+          }
           ok = await selectLocationReactSelectValue(input, value, dataToFill.state);
-          if (ok) break;
+          if (ok) {
+            log(` City field filled with US/Canada preference`);
+            await sleep(300); // Extra delay after city selection
+            break;
+          }
         }
       }
 
       // Fallback: fill by label text (more robust on Greenhouse)
-      if (!ok && BASIC_LABEL_KEYWORDS[fieldName]) {
+      // Skip fallback for city - already handled above with US/Canada preference
+      if (!ok && BASIC_LABEL_KEYWORDS[fieldName] && fieldName !== 'city') {
         ok = await fillByLabelKeywords(BASIC_LABEL_KEYWORDS[fieldName], value);
       }
 
