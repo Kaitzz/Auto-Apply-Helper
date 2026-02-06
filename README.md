@@ -1,4 +1,4 @@
-# Auto-Apply Helper (BETA) — v0.9.6
+# Auto-Apply Helper (BETA) — v0.9.6.2
 
 A Chrome extension that helps you **autofill job application forms** (Greenhouse-first), including **basic fields + resume/attachments upload + AI-powered custom question answering**.
 
@@ -31,18 +31,7 @@ A Chrome extension that helps you **autofill job application forms** (Greenhouse
 - **Smart React-Select handling** — properly fills dropdown menus with AI-suggested answers
 - **Toggle control** in sidepanel to enable/disable AI answering
 - Only **required questions** are sent to AI — optional questions are skipped to save API calls
-
-### Setup AI
-
-1. Get a Claude API key from [Anthropic Console](https://console.anthropic.com/)
-2. Copy `extension/config.js` to `extension/config.local.js`
-3. Add your API key in `config.local.js`:
-
-   ```javascript
-   const CLAUDE_API_KEY_LOCAL = 'your-api-key-here';
-   ```
-
-4. Reload the extension
+- **🔒 Secure by design** — API key is stored on a Cloudflare Worker proxy, not in the extension
 
 ---
 
@@ -81,10 +70,9 @@ A Chrome extension that helps you **autofill job application forms** (Greenhouse
 ## 🔐 Data & Privacy
 
 - Your profile data is stored locally using Chrome extension storage (`chrome.storage.local`).
-- AI requests are sent directly to Anthropic's API — no intermediate servers.
+- AI requests are sent through a secure Cloudflare Worker proxy — the API key never touches the browser.
 - This extension does **not** sell or share your data.
 - The extension only runs on supported application pages and only uses your data to fill the form fields you see.
-- API keys are stored locally in `config.local.js` (gitignored) and never committed to version control.
 
 ---
 
@@ -127,7 +115,7 @@ The extension continues conservatively to avoid triggering hydration crashes.
 
 ### AI not working
 
-- Check that `config.local.js` exists with a valid API key
+- Check your internet connection
 - Check the background service worker console for API errors
 - Ensure the AI toggle is enabled in the sidepanel
 
@@ -148,6 +136,7 @@ The extension uses the proven `selectReactSelectValue` method with proper pointe
 
 ## 📌 Version History
 
+- **v0.9.6.2 (BETA)** — Switched to Cloudflare Worker proxy for secure API key handling; ready for Chrome Web Store
 - **v0.9.6 (BETA)** — Claude AI integration for answering custom questions; improved React-Select handling; AI toggle in sidepanel
 - **v0.9.5 (BETA)** — Greenhouse autofill + attachments upload stabilized; safe-mode guard added for dynamic/hydrating pages
 

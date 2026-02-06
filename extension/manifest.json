@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Auto-Apply Helper Developer Edition",
-  "version": "0.9.6",
+  "version": "0.9.6.2",
   "description": "Helps fill out forms on ATS job applications with one click. Supports EEO fields and AI-powered custom question answering.",
   
   "permissions": [
@@ -15,7 +15,7 @@
     "https://boards.greenhouse.io/*",
     "https://job-boards.greenhouse.io/*",
     "https://*.greenhouse.io/*",
-    "https://api.anthropic.com/*"
+    "https://autofill-ai-proxy.corneliazhang.workers.dev/*"
   ],
   
   "action": {

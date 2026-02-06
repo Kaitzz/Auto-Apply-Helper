@@ -5,22 +5,10 @@
 const DEBUG = true;
 const log = (...args) => { if (DEBUG) console.log('[Background]', ...args); };
 
-// Claude API configuration
-const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
+// Claude API configuration - using Cloudflare Worker proxy
+// The API key is stored securely in the Cloudflare Worker, not in the extension
+const CLAUDE_PROXY_URL = 'https://autofill-ai-proxy.corneliazhang.workers.dev';
 const CLAUDE_MODEL = 'claude-sonnet-4-20250514';
-
-// Load API key from config.local.js (gitignored)
-// To use: create config.local.js with: const CLAUDE_API_KEY_LOCAL = 'your-key';
-let CLAUDE_API_KEY = 'YOUR_API_KEY_HERE';
-try {
-  importScripts('config.local.js');
-  if (typeof CLAUDE_API_KEY_LOCAL !== 'undefined') {
-    CLAUDE_API_KEY = CLAUDE_API_KEY_LOCAL;
-    log('API key loaded from config.local.js');
-  }
-} catch (e) {
-  log('config.local.js not found, using placeholder. Create config.local.js with your API key.');
-}
 
 // ==================== Claude AI Service ====================
 
@@ -31,24 +19,17 @@ try {
  * @returns {Promise<Array>} - Array of {label, answer} pairs
  */
 async function askClaudeForAnswers(questions, userContext) {
-  if (!CLAUDE_API_KEY || CLAUDE_API_KEY === 'YOUR_API_KEY_HERE') {
-    throw new Error('Claude API key not configured. Please set CLAUDE_API_KEY in background.js');
-  }
-
   // Build the prompt
   const systemPrompt = buildSystemPrompt(userContext);
   const userPrompt = buildUserPrompt(questions);
 
-  log('Calling Claude API with', questions.length, 'questions');
+  log('Calling Claude API via proxy with', questions.length, 'questions');
 
   try {
-    const response = await fetch(CLAUDE_API_URL, {
+    const response = await fetch(CLAUDE_PROXY_URL, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': CLAUDE_API_KEY,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         model: CLAUDE_MODEL,
