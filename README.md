@@ -19,9 +19,9 @@ A Chrome extension that helps you **autofill job application forms** (Greenhouse
   - Work authorization / sponsorship fields
   - EEO demographic fields (gender, race/ethnicity, veteran status, disability status)
 - Uploads attachments (Resume/CV, Cover Letter) when the form provides upload controls.
-- **🆕 AI-Powered Custom Questions**: Uses Claude AI to automatically answer required custom questions (e.g., "How did you hear about us?", "Have you worked here before?")
-- **🆕 Auto-Submit**: Optionally click "Submit Application" after filling — detects success via URL change to confirmation page
-- **🆕 Stop Button**: Always-visible stop button to halt autofill at any point
+- **🆕 AI-Powered Custom Questions**: Uses Claude AI to automatically answer required custom questions
+- **🆕 Auto-Submit**: Optionally click "Submit Application" after filling
+- **🆕 Stop Button**: Stop button to halt autofill at any point
 - "Safe mode" guard on dynamic pages: if the page is still "settling" (React hydration / re-render), it will avoid aggressive actions that may break the form UI.
 
 ---
