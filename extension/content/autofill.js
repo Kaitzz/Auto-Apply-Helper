@@ -1398,7 +1398,6 @@
 
   async function fillByLabelKeywords(keywords, desiredValue, opts = {}) {
     if (!desiredValue) return false;
-    const { skipIfSelected = false } = opts;
 
     // A) react-select combobox (skip phone-input country selectors)
     const comboInputs = Array.from(document.querySelectorAll('input.select__input[role="combobox"]'))
@@ -1407,7 +1406,8 @@
       const lab = labelTextForInput(input);
       if (!matchesAnyKeyword(lab, keywords)) continue;
 
-      if (skipIfSelected && reactSelectHasAnySelection(input)) {
+      // Always skip if already has a selection (single or multi)
+      if (reactSelectHasAnySelection(input)) {
         continue;
       }
 
@@ -1484,8 +1484,6 @@
       // Check if label matches any keyword
       const matches = labelKeywords.some(kw => labelText.includes((kw || '').toLowerCase()));
       if (!matches) continue;
-
-      log(` Found label: "${labelText.substring(0, 60)}"`);
       
       // Greenhouse: label is inside select__container, select-shell is sibling
       const selectContainer = label.parentElement;
@@ -1493,24 +1491,20 @@
       
       // Skip phone-input country selectors
       if (selectContainer.closest('.phone-input, .iti')) {
-        log(' Skipping phone-input country selector');
         continue;
       }
       
       // Find the select-shell sibling
       const selectShell = selectContainer.querySelector('.select-shell, [class*="select-shell"]');
+      if (!selectShell) continue;
       
-      if (!selectShell) {
-        log(' No select-shell found');
+      // Check if already has a value (single OR multi-select - we only fill once)
+      // Do this check BEFORE logging to reduce noise on retries
+      if (reactSelectHasAnySelectionFromShell(selectShell)) {
         continue;
       }
-      
-      // Check if already has a value
-      const existingValue = selectShell.querySelector('.select__single-value');
-      if (existingValue && existingValue.textContent && !existingValue.textContent.includes('Select')) {
-        log(' Already has value:', existingValue.textContent);
-        continue;
-      }
+
+      log(` Found label: "${labelText.substring(0, 60)}"`);
       
       // Get input for later use
       const input = selectShell.querySelector('input.select__input, input[role="combobox"]');
@@ -1717,7 +1711,7 @@
         
         // Scroll option into view smoothly
         bestMatch.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-        await new Promise(r => setTimeout(r, 150));
+        await new Promise(r => setTimeout(r, 200));
         
         // Click using pointer events
         const optRect = bestMatch.getBoundingClientRect();
@@ -2249,8 +2243,9 @@
 
   async function openReactSelect(inputEl) {
     inputEl.focus();
+    await sleep(30);
     dispatchMouseLikeClick(inputEl);
-    await sleep(40);
+    await sleep(80); // Wait for dropdown to open
   }
 
   /**
@@ -2364,9 +2359,9 @@
 
     log(` Location: selected "${bestOption.textContent?.trim()}" (score: ${bestScore})`);
     bestOption.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    await sleep(150); // Wait for smooth scroll
+    await sleep(200); // Wait for smooth scroll
     dispatchMouseLikeClick(bestOption);
-    await sleep(200); // Longer delay after click
+    await sleep(250); // Delay after click
 
     // Close dropdown by clicking elsewhere
     document.body.click();
@@ -2385,21 +2380,43 @@
     await openReactSelect(inputEl);
 
     for (const cand of candidates.filter(Boolean)) {
+      // Make sure dropdown is still open
+      if (inputEl.getAttribute('aria-expanded') !== 'true') {
+        await openReactSelect(inputEl);
+      }
+      
       setNativeInputValue(inputEl, '');
-      await sleep(10);
+      inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+      await sleep(30);
+      
       setNativeInputValue(inputEl, cand);
-      await sleep(90);
+      inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+      await sleep(150); // Wait for options to load
 
-      const options = getReactSelectOptions(inputEl);
+      let options = getReactSelectOptions(inputEl);
+      
+      // If no options yet, wait a bit more and try re-opening
+      if (!options.length) {
+        await sleep(150);
+        options = getReactSelectOptions(inputEl);
+      }
+      
+      // Still no options? Try re-opening the dropdown
+      if (!options.length) {
+        await openReactSelect(inputEl);
+        await sleep(100);
+        options = getReactSelectOptions(inputEl);
+      }
+      
       if (!options.length) continue;
 
       const { best, bestScore } = findBestOption(options, cand);
-      if (!best || bestScore < 80) continue;
+      if (!best || bestScore < 50) continue; // Lowered threshold from 80 to 50
 
       best.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      await sleep(100); // Wait for smooth scroll
+      await sleep(180); // Wait for smooth scroll
       dispatchMouseLikeClick(best);
-      await sleep(150);
+      await sleep(180);
 
       if (!getReactSelectListbox(inputEl)) return true;
       if (inputEl.getAttribute('aria-expanded') === 'false') return true;
@@ -2598,7 +2615,7 @@
         if (ok) { results.push(field.name); break; }
       }
 
-      await new Promise(r => setTimeout(r, 300));
+      await new Promise(r => setTimeout(r, 400));
     }
     
     return results;
@@ -2639,13 +2656,8 @@
 
       const shell = getReactSelectShellFromInput(input);
 
-      // Rule: never touch a MULTI-select race field again once it has any selection
-      if (reactSelectLooksMulti(shell) && reactSelectHasAnySelectionFromShell(shell)) {
-        continue;
-      }
-
-      // also skip any already-filled single-select (safe)
-      if (!reactSelectLooksMulti(shell) && reactSelectHasAnySelectionFromShell(shell)) {
+      // Skip if already has any selection (single or multi - we only fill once)
+      if (reactSelectHasAnySelectionFromShell(shell)) {
         continue;
       }
 
@@ -3083,6 +3095,9 @@
       }
 
       if (ok) results.filled.push(fieldName);
+      
+      // Delay between field fills for smoother visual experience
+      await sleep(200);
     }
     
     // Handle phone separately with country code
@@ -3090,11 +3105,13 @@
       if (await fillPhoneWithCountry(dataToFill.phone)) {
         results.filled.push('phone');
       }
+      await sleep(300);
     }
     
     // Fill education fields
     const eduResults = await fillEducationFields(dataToFill);
     results.filled.push(...eduResults);
+    if (eduResults.length) await sleep(300);
     
     // Fill EEO fields
     const eeoResults = await fillEEOFields(dataToFill);
