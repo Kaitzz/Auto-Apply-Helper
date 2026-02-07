@@ -1,4 +1,4 @@
-# Auto-Apply Helper (BETA) - v0.9.7.2
+# Auto-Apply Helper (BETA) - v0.9.7.3
 
 A Chrome extension that helps you **autofill job application forms** (Greenhouse-first), including **basic fields + resume/attachments upload + AI-powered custom question answering**.
 
@@ -20,6 +20,8 @@ A Chrome extension that helps you **autofill job application forms** (Greenhouse
   - EEO demographic fields (gender, race/ethnicity, veteran status, disability status)
 - Uploads attachments (Resume/CV, Cover Letter) when the form provides upload controls.
 - **🆕 AI-Powered Custom Questions**: Uses Claude AI to automatically answer required custom questions (e.g., "How did you hear about us?", "Have you worked here before?")
+- **🆕 Auto-Submit**: Optionally click "Submit Application" after filling — detects success via URL change to confirmation page
+- **🆕 Stop Button**: Always-visible stop button to halt autofill at any point
 - "Safe mode" guard on dynamic pages: if the page is still "settling" (React hydration / re-render), it will avoid aggressive actions that may break the form UI.
 
 ---
@@ -136,6 +138,7 @@ The extension uses the proven `selectReactSelectValue` method with proper pointe
 
 ## 📌 Version History
 
+- **v0.9.7.3 (BETA)** - Auto-submit after fill with URL-based success detection; Stop button always visible in sidepanel; no banner on confirmation/thank-you pages
 - **v0.9.7.2 (BETA)** - AI now answers both required and optional questions; auto-fill verification/confirmation experience questions with "Yes" before AI processing; smarter Location (City) react-select picks US/Canada cities based on user's state
 - **v0.9.7 (BETA)** - UI refresh with Greenhouse-matching blue palette; improved unanswered question detection; smoother success banner timing
 - **v0.9.6.2 (BETA)** — Switched to Cloudflare Worker proxy for secure API key handling; ready for Chrome Web Store

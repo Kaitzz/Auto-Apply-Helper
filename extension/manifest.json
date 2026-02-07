@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Auto-Apply Helper Developer Edition",
   "version": "0.9.7.3",
-  "description": "Helps fill out forms on ATS job applications with one click. Supports EEO fields and AI-powered custom question answering.",
+  "description": "Autofill job applications with one click. AI answers custom questions. Optional auto-submit. Greenhouse-first.",
   
   "permissions": [
     "storage",
