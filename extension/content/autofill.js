@@ -21,6 +21,16 @@
   let __resumeUploadedOnce = false;
   let __coverLetterUploadedOnce = false;
 
+  // Global stop flag - set to true to halt autofill immediately
+  let __stopRequested = false;
+  
+  // Check if stop was requested, throws if so
+  function checkStop() {
+    if (__stopRequested) {
+      throw new Error('STOPPED');
+    }
+  }
+
   // ==================== In-Page Notification ====================
   
   // Persistent "Supported" Banner (no auto-dismiss) ----------
@@ -329,12 +339,22 @@
 
   // ==================== Detection ====================
 
+  function isConfirmationPage() {
+    const path = window.location.pathname.toLowerCase();
+    return path.includes('/confirmation') || 
+           path.includes('/thank') || 
+           path.includes('/success') ||
+           path.includes('/submitted');
+  }
+
   function isGreenhousePage() {
+    if (isConfirmationPage()) return false;
     return window.location.hostname.includes('greenhouse.io') ||
            document.querySelector('#application_form') !== null;
   }
 
   function isGreenhouseApplicationPage() {
+    if (isConfirmationPage()) return false;
     // strongest signal: application form exists
     return location.hostname.includes('greenhouse.io') && !!document.querySelector('#application_form');
     // OR if you already have isApplicationPage() that correctly detects /jobs/\d+,
@@ -342,6 +362,10 @@
   }
 
   function detectFormType() {
+    if (isConfirmationPage()) {
+      return { type: 'confirmation', detected: false };
+    }
+    
     if (isGreenhousePage()) {
       return { type: 'greenhouse', detected: true };
     }
@@ -3098,6 +3122,9 @@
       
       // Delay between field fills for smoother visual experience
       await sleep(200);
+      
+      // Check for stop request
+      checkStop();
     }
     
     // Handle phone separately with country code
@@ -3107,15 +3134,18 @@
       }
       await sleep(300);
     }
+    checkStop();
     
     // Fill education fields
     const eduResults = await fillEducationFields(dataToFill);
     results.filled.push(...eduResults);
     if (eduResults.length) await sleep(300);
+    checkStop();
     
     // Fill EEO fields
     const eeoResults = await fillEEOFields(dataToFill);
     results.filled.push(...eeoResults);
+    checkStop();
     
     // Work authorization - always Yes
     if (fillAuthorizedField()) {
@@ -3160,6 +3190,7 @@
 
     // Race / Ethnicity
     await fillRaceEthnicityAll(userData);
+    checkStop();
     
     // Upload documents (won't re-upload if already uploaded)
     if (resumeData) {
@@ -3170,6 +3201,7 @@
       const uploaded = await uploadCoverLetter(coverLetterData);
       if (uploaded) __coverLetterUploadedOnce = true;
     }
+    checkStop();
     
     // Use global state - once true, stays true across retries
     results.resumeUploaded = __resumeUploadedOnce;
@@ -3192,6 +3224,135 @@
     return results;
   }
 
+  // ==================== Auto-Submit ====================
+  
+  /**
+   * Attempt to click the "Submit Application" button and verify success via URL change.
+   * Returns { submitted: true } on success, { submitFailed: true } on failure.
+   */
+  async function attemptAutoSubmit() {
+    log(' Attempting auto-submit...');
+    
+    // Log the application URL for future use
+    const applicationUrl = window.location.href;
+    console.log('[JobAutofill] Application URL:', applicationUrl);
+    
+    try {
+      // Store in chrome.storage for potential future use
+      await chrome.storage.local.set({
+        lastApplicationUrl: applicationUrl,
+        lastApplicationTimestamp: Date.now()
+      });
+    } catch (e) {
+      console.warn('[JobAutofill] Could not save application URL:', e);
+    }
+    
+    // Find the submit button
+    const submitButton = findSubmitButton();
+    if (!submitButton) {
+      log(' No submit button found');
+      return { submitFailed: true, reason: 'No submit button found' };
+    }
+    
+    log(' Found submit button:', submitButton.textContent?.trim());
+    
+    // Save current URL to compare after click
+    const urlBefore = window.location.href;
+    
+    // Scroll button into view and click
+    submitButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    await sleep(500);
+    
+    // Click the button
+    submitButton.click();
+    log(' Clicked submit button');
+    
+    // Wait for potential navigation (up to 5 seconds)
+    const navigationTimeout = 5000;
+    const pollInterval = 200;
+    const startTime = Date.now();
+    
+    while (Date.now() - startTime < navigationTimeout) {
+      await sleep(pollInterval);
+      
+      const urlAfter = window.location.href;
+      
+      // Check for success indicators in URL
+      if (urlAfter.includes('/confirmation') || 
+          urlAfter.includes('/thank') ||
+          urlAfter.includes('/success') ||
+          urlAfter.includes('/submitted') ||
+          urlAfter !== urlBefore) {
+        log(' Submit successful! URL changed to:', urlAfter);
+        updateNotificationBanner('success', { 
+          message: 'Application submitted successfully!' 
+        });
+        return { submitted: true, newUrl: urlAfter };
+      }
+    }
+    
+    // Check if we're still on the same page (submit failed)
+    if (window.location.href === urlBefore) {
+      log(' Submit failed - URL did not change');
+      updateNotificationBanner('error', { 
+        message: 'Auto-submit failed. Please complete all required fields and submit manually.' 
+      });
+      return { submitFailed: true, reason: 'URL did not change' };
+    }
+    
+    return { submitted: true };
+  }
+  
+  /**
+   * Find the submit application button on the page.
+   */
+  function findSubmitButton() {
+    log(' Looking for submit button...');
+    
+    // First priority: button[type="submit"] is almost always the submit button
+    const submitTypeBtn = document.querySelector('button[type="submit"]');
+    if (submitTypeBtn && isVisibleElement(submitTypeBtn)) {
+      log(' Found button[type="submit"]:', submitTypeBtn.textContent?.trim());
+      return submitTypeBtn;
+    }
+    
+    // Common submit button selectors for Greenhouse and other ATS
+    const selectors = [
+      'input[type="submit"]',
+      'button[data-testid="submit"]',
+      'button[id*="submit"]',
+      '#submit_app',
+      '.submit-application',
+    ];
+    
+    // Try direct selectors
+    for (const selector of selectors) {
+      const btn = document.querySelector(selector);
+      if (btn && isVisibleElement(btn)) {
+        log(' Found submit button via selector:', selector);
+        return btn;
+      }
+    }
+    
+    // Search all buttons for submit-like text
+    const allButtons = document.querySelectorAll('button, input[type="submit"]');
+    for (const btn of allButtons) {
+      if (!isVisibleElement(btn)) continue;
+      const text = (btn.textContent || btn.value || '').toLowerCase();
+      if (text.includes('submit application') || 
+          text.includes('submit your application') ||
+          text === 'submit' ||
+          text === 'apply' ||
+          text === 'apply now') {
+        log(' Found submit button via text match:', text);
+        return btn;
+      }
+    }
+    
+    log(' No submit button found');
+    return null;
+  }
+
   // Expose for AutoRun / debug (scope-safe)
   try {
     window.__JOB_AUTOFILL__ = window.__JOB_AUTOFILL__ || {};
@@ -3208,6 +3369,8 @@
       fillAnswer,
       fillAIAnswers,
       requestAndFillAIAnswers,
+      attemptAutoSubmit,
+      findSubmitButton,
     });
   } catch (e) {}
 
@@ -3218,14 +3381,41 @@
       case 'DETECT_FORM':
         sendResponse(detectFormType());
         break;
+      
+      case 'STOP_AUTOFILL':
+        __stopRequested = true;
+        log(' Stop requested');
+        sendResponse({ ok: true });
+        break;
         
       case 'AUTOFILL':
-        performAutofill(message.userData, message.resumeData, message.coverLetterData).then(results => {
-          sendResponse(results);
-        }).catch(err => {
-          console.error("[JobAutofill] performAutofill crashed:", err);
-          sendResponse({ filled: [], error: String(err?.message || err) });
-        });
+        __stopRequested = false; // Reset stop flag at start
+        (async () => {
+          try {
+            const results = await performAutofill(message.userData, message.resumeData, message.coverLetterData);
+            
+            // Check if stopped
+            if (__stopRequested) {
+              sendResponse({ ...results, stopped: true });
+              return;
+            }
+            
+            // Auto-submit if enabled
+            if (message.autoSubmitEnabled) {
+              const submitResult = await attemptAutoSubmit();
+              sendResponse({ ...results, ...submitResult });
+            } else {
+              sendResponse(results);
+            }
+          } catch (err) {
+            if (err.message === 'STOPPED') {
+              sendResponse({ filled: [], stopped: true });
+            } else {
+              console.error("[JobAutofill] performAutofill crashed:", err);
+              sendResponse({ filled: [], error: String(err?.message || err) });
+            }
+          }
+        })();
         return true;
         
       case 'PING':
@@ -3327,6 +3517,15 @@ function isAutofillTargetPage() {
   const host = window.location.hostname;
   const path = window.location.pathname;
 
+  // Exclude confirmation/thank you pages
+  const pathLower = path.toLowerCase();
+  if (pathLower.includes('/confirmation') || 
+      pathLower.includes('/thank') || 
+      pathLower.includes('/success') ||
+      pathLower.includes('/submitted')) {
+    return false;
+  }
+
   // Greenhouse: URL contains /jobs/<number>
   if (host.includes('greenhouse.io') && /\/jobs\/\d+/.test(path)) return true;
 
@@ -3397,8 +3596,8 @@ async function autoRunIfEnabled() {
       return;
     }
 
-    const { autoFillEnabled = true, userData, resumeData, coverLetterData } =
-      await chrome.storage.local.get(['autoFillEnabled', 'userData', 'resumeData', 'coverLetterData']);
+    const { autoFillEnabled = true, userData, resumeData, coverLetterData, autoSubmitEnabled = false } =
+      await chrome.storage.local.get(['autoFillEnabled', 'userData', 'resumeData', 'coverLetterData', 'autoSubmitEnabled']);
 
     // 只有明确设置为 false 才禁用;undefined 视为开启(兼容旧数据)
     if (autoFillEnabled === false) {
@@ -3496,7 +3695,26 @@ async function autoRunIfEnabled() {
         message: 'Auto-fill ran, but nothing was filled.'
       });
     }
+
+    // ========== Auto-Submit Phase ==========
+    if (autoSubmitEnabled && !__stopRequested) {
+      console.log('[JobAutofill] Auto-submit enabled, attempting to submit...');
+      const submitResult = await attemptAutoSubmit();
+      if (submitResult.submitted) {
+        console.log('[JobAutofill] Application submitted successfully!');
+      } else if (submitResult.submitFailed) {
+        console.log('[JobAutofill] Auto-submit failed:', submitResult.reason);
+      }
+    }
   } catch (err) {
+    // Handle stop gracefully - not an error
+    if (err.message === 'STOPPED' || __stopRequested) {
+      console.log('[JobAutofill] Auto-run stopped by user');
+      window.__JOB_AUTOFILL__?.updateNotificationBanner?.('supported', {
+        message: 'Stopped.'
+      });
+      return;
+    }
     console.error('[JobAutofill] Auto-run failed:', err);
     window.__JOB_AUTOFILL__?.updateNotificationBanner?.('error', {
       message: `Auto-run failed: ${String(err?.message || err)}`

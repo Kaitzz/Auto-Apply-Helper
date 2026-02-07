@@ -281,6 +281,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: true });
       });
       return true;
+    
+    case "STOP_AUTOFILL": {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const tab = tabs && tabs[0];
+        if (!tab?.id) {
+          sendResponse({ ok: false, error: "No active tab" });
+          return;
+        }
+        chrome.tabs.sendMessage(tab.id, { type: "STOP_AUTOFILL" }, (response) => {
+          if (chrome.runtime.lastError) {
+            sendResponse({ ok: false, error: chrome.runtime.lastError.message });
+            return;
+          }
+          sendResponse(response);
+        });
+      });
+      return true;
+    }
       
     case "TRIGGER_AUTOFILL": {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -294,11 +312,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const userData = message.userData ?? result.userData ?? {};
           const resumeData = message.resumeData ?? result.resumeData ?? null;
           const coverLetterData = message.coverLetterData ?? result.coverLetterData ?? null;
+          const autoSubmitEnabled = message.autoSubmitEnabled ?? false;
 
           // IMPORTANT: your content script expects type: "AUTOFILL"
           chrome.tabs.sendMessage(
             tab.id,
-            { type: "AUTOFILL", userData, resumeData, coverLetterData },
+            { type: "AUTOFILL", userData, resumeData, coverLetterData, autoSubmitEnabled },
             (response) => {
               if (chrome.runtime.lastError) {
                 sendResponse({ filled: null, error: chrome.runtime.lastError.message });

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { User, Briefcase, FileText, Zap, Check, AlertCircle, Upload, Save, Shield, GraduationCap } from 'lucide-react'
+import { User, Briefcase, FileText, Zap, Check, AlertCircle, Upload, Save, Shield, GraduationCap, Square, Send } from 'lucide-react'
 
 // Country options with area codes
 const COUNTRY_OPTIONS = [
@@ -218,15 +218,19 @@ function App() {
   const [formType, setFormType] = useState(null)
   const [saveStatus, setSaveStatus] = useState({})
   const [aiEnabled, setAiEnabled] = useState(true)
+  const [autoSubmitEnabled, setAutoSubmitEnabled] = useState(false)
+  const [isRunning, setIsRunning] = useState(false)
 
   // Load saved data on mount
   useEffect(() => {
-    storage.get(['userData', 'resumeData', 'coverLetterData', 'aiEnabled']).then((result) => {
+    storage.get(['userData', 'resumeData', 'coverLetterData', 'aiEnabled', 'autoSubmitEnabled']).then((result) => {
       if (result.userData) setFormData(prev => ({ ...prev, ...result.userData }))
       if (result.resumeData) setResumeData(result.resumeData)
       if (result.coverLetterData) setCoverLetterData(result.coverLetterData)
       // AI is enabled by default (true), only disable if explicitly set to false
       if (result.aiEnabled === false) setAiEnabled(false)
+      // Auto-submit is disabled by default
+      if (result.autoSubmitEnabled === true) setAutoSubmitEnabled(true)
     })
     
     sendMessage({ type: 'DETECT_FORM' }).then((result) => {
@@ -305,8 +309,21 @@ function App() {
     reader.readAsDataURL(file)
   }
 
+  // Stop autofill
+  const handleStop = async () => {
+    try {
+      await sendMessage({ type: 'STOP_AUTOFILL' })
+      setIsRunning(false)
+      setStatus({ type: '', message: 'Stopped.' })
+      setTimeout(() => setStatus({ type: '', message: '' }), 3000)
+    } catch (error) {
+      console.error('Stop failed:', error)
+    }
+  }
+
   // Trigger autofill
   const handleAutofill = async () => {
+    setIsRunning(true)
     setStatus({ type: 'loading', message: 'Filling form...' })
     
     try {
@@ -318,10 +335,17 @@ function App() {
           needs_sponsorship: needsSponsorship()
         },
         resumeData: resumeData,
-        coverLetterData: coverLetterData
+        coverLetterData: coverLetterData,
+        autoSubmitEnabled: autoSubmitEnabled
       })
       
-      if (result && result.filled) {
+      if (result && result.stopped) {
+        setStatus({ type: '', message: 'Stopped.' })
+      } else if (result && result.submitted) {
+        setStatus({ type: 'success', message: 'Application submitted!' })
+      } else if (result && result.submitFailed) {
+        setStatus({ type: 'error', message: 'Auto-submit failed. Please complete all required fields and submit manually.' })
+      } else if (result && result.filled) {
         const filledCount = result.filled.length
         const resumeMsg = result.resumeUploaded ? ` Resume uploaded!` : ''
         setStatus({ type: 'success', message: `Filled ${filledCount} fields!${resumeMsg}` })
@@ -332,6 +356,7 @@ function App() {
       setStatus({ type: 'error', message: 'Error: ' + error.message })
     }
     
+    setIsRunning(false)
     setTimeout(() => setStatus({ type: '', message: '' }), 12000)
   }
 
@@ -393,13 +418,27 @@ function App() {
 
       {/* Autofill Button */}
       <div className="p-4 border-b bg-white">
-        <button
-          onClick={handleAutofill}
-          className="w-full bg-brand hover:bg-brand-dark text-white font-medium py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors"
-        >
-          <Zap size={18} />
-          Fill Application
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={handleAutofill}
+            disabled={isRunning}
+            className={`flex-1 font-medium py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors ${
+              isRunning 
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                : 'bg-brand hover:bg-brand-dark text-white'
+            }`}
+          >
+            <Zap size={18} />
+            {isRunning ? 'Filling...' : 'Fill Application'}
+          </button>
+          <button
+            onClick={handleStop}
+            className="px-4 py-3 font-medium rounded-lg flex items-center justify-center gap-2 transition-colors bg-white border-2 border-brand text-brand hover:bg-brand-50"
+          >
+            <Square size={16} />
+            Stop
+          </button>
+        </div>
         
         {/* AI Toggle */}
         <div className="mt-3 flex items-center justify-between">
@@ -417,6 +456,27 @@ function App() {
             <span
               className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
                 aiEnabled ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
+
+        {/* Auto-submit Toggle */}
+        <div className="mt-2 flex items-center justify-between">
+          <span className="text-sm text-gray-600">Auto-submit after fill</span>
+          <button
+            onClick={() => {
+              const newValue = !autoSubmitEnabled
+              setAutoSubmitEnabled(newValue)
+              storage.set({ autoSubmitEnabled: newValue })
+            }}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+              autoSubmitEnabled ? 'bg-brand' : 'bg-gray-300'
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                autoSubmitEnabled ? 'translate-x-6' : 'translate-x-1'
               }`}
             />
           </button>
